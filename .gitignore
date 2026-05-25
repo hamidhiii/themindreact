@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.claude/
+
+the_mind/
+
+*.log
+vite-dev*.log
+
+*.postman_collection.json
+The Mind Project API.postman_collection.json
+API_GAPS.md
+
+.env
+.env.*
+!.env.example
+
+*.local
+coverage/
