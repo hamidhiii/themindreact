@@ -1,5 +1,10 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import { axiosBaseQuery } from '../../api/axiosBaseQuery';
+import { ApiPaths } from '../../api/apiPaths';
+import { dataWithFallbacks, extractMapList } from '../../api/apiResponse';
+import {
+  extractLinkedUserId,
+} from '../../utils/teacherProfile';
 import type {
   TeacherModel,
   TeacherDashboardModel,
@@ -12,11 +17,13 @@ import type {
 } from '../../types';
 
 function parseTeacher(j: Record<string, unknown>): TeacherModel {
+  const fullName = String(j['full_name'] ?? j['name'] ?? j['fullName'] ?? '').trim();
   return {
     id: String(j['id'] ?? ''),
-    fullName: String(j['full_name'] ?? j['name'] ?? ''),
+    fullName,
     username: (j['username'] ?? '') as string,
-    phoneNumber: (j['phone_number'] ?? '') as string,
+    phoneNumber: String(j['phone'] ?? j['phone_number'] ?? '').trim(),
+    userId: extractLinkedUserId(j) || undefined,
     isActive: (j['is_active'] ?? true) as boolean,
     isSupport: (j['is_support'] ?? false) as boolean,
     experienceYear: Number(j['experience_year'] ?? 0),
@@ -126,55 +133,73 @@ export const teacherApi = createApi({
   tagTypes: ['Teacher'],
   endpoints: (builder) => ({
     getTeacherChoices: builder.query<TeacherModel[], void>({
-      query: () => ({ url: '/teacher/choices/' }),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [{ url: ApiPaths.teacherChoices }],
+          (raw) => extractMapList(raw).map(parseTeacher)
+        ),
       providesTags: ['Teacher'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseTeacher);
-      },
     }),
     getTeachers: builder.query<TeacherModel[], void>({
-      query: () => ({ url: '/teacher/teachers/' }),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.teacher },
+            { url: '/teacher/teachers/' },
+          ],
+          (raw) => extractMapList(raw).map(parseTeacher)
+        ),
       providesTags: ['Teacher'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseTeacher);
-      },
     }),
     getTeacherDetail: builder.query<TeacherDashboardModel, string>({
-      query: (id) => ({ url: `/teacher/teachers/${id}/detail/` }),
-      transformResponse: (raw) => parseTeacherDashboard(raw as Record<string, unknown>),
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.teacherStats(id) },
+            { url: ApiPaths.teacherId(id) },
+            { url: `/teacher/teachers/${id}/detail/` },
+          ],
+          (raw) => parseTeacherDashboard(raw as Record<string, unknown>)
+        ),
     }),
     getTeacherHistory: builder.query<Record<string, unknown>[], string>({
-      query: (id) => ({ url: `/teacher/teachers/${id}/detail/history/` }),
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        if (Array.isArray(data)) return data as Record<string, unknown>[];
-        return ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[]) ?? [];
-      },
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: `/teacher/teachers/${id}/detail/history/` },
+          ],
+          extractMapList
+        ),
     }),
     getTeacherTodayLessons: builder.query<TodayLessonModel[], string>({
-      query: (id) => ({ url: `/teacher/teachers/${id}/detail/today-lessons/` }),
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseTodayLesson);
-      },
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.teacherLessonsToday(id) },
+            { url: `/teacher/teachers/${id}/detail/today-lessons/` },
+          ],
+          (raw) => extractMapList(raw).map(parseTodayLesson)
+        ),
     }),
     getTeacherDashboard: builder.query<TeacherDashboardModel, void>({
-      query: () => ({ url: '/teacher/dashboard/' }),
-      transformResponse: (raw) => parseTeacherDashboard(raw as Record<string, unknown>),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.teacherSummary },
+            { url: ApiPaths.salarySummary },
+            { url: '/teacher/dashboard/' },
+          ],
+          (raw) => parseTeacherDashboard(raw as Record<string, unknown>)
+        ),
     }),
     getTeacherGroups: builder.query<GroupModel[], string>({
-      query: (teacherId) => ({ url: '/group/groups/', params: { teacher: teacherId } }),
+      query: (teacherId) => ({ url: ApiPaths.group, params: { teacher: teacherId } }),
       transformResponse: (raw) => {
         const data = raw as unknown;
         const list: Record<string, unknown>[] = Array.isArray(data)
@@ -184,19 +209,19 @@ export const teacherApi = createApi({
       },
     }),
     getTeacherFinancial: builder.query<TeacherFinancialModel, string>({
-      query: (id) => ({ url: `/teacher/teachers/${id}/financial` }),
+      query: (id) => ({ url: `/teacher/teachers/${id}/financial/` }),
       transformResponse: (raw) => parseTeacherFinancial(raw as Record<string, unknown>),
     }),
     updateTeacherStatus: builder.mutation<void, { id: string; isActive: boolean }>({
       query: ({ id, isActive }) => ({
-        url: `/teacher/teachers/${id}/`,
+        url: ApiPaths.teacherId(id),
         method: 'PATCH',
         data: { is_active: isActive },
       }),
       invalidatesTags: ['Teacher'],
     }),
     deleteTeacher: builder.mutation<void, string>({
-      query: (id) => ({ url: `/teacher/teachers/${id}/`, method: 'DELETE' }),
+      query: (id) => ({ url: ApiPaths.teacherId(id), method: 'DELETE' }),
       invalidatesTags: ['Teacher'],
     }),
     getGroupJournal: builder.query<Record<string, unknown>, { groupId: number; lessonDate?: string; teacherId?: string }>({

@@ -1,18 +1,35 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Plus, Search, Phone, MapPin,
     MoreVertical, UserPlus, ChevronDown,
-    ArrowUpDown
+    ArrowUpDown, Pencil, Trash2,
 } from 'lucide-react';
-import { useGetWorkersQuery } from '../../store/api/workerApi';
+import {
+    useCreateWorkerMutation,
+    useDeleteWorkerMutation,
+    useGetWorkersQuery,
+    useUpdateWorkerMutation,
+} from '../../store/api/workerApi';
+import type { AdminModel } from '../../types';
+import ModalShell from '../../components/common/ModalShell';
+import CustomSelect from '../../components/common/CustomSelect';
+import { formatApiError } from '../../utils/apiError';
+import { useToast } from '../../hooks/useToast';
 
 export default function WorkersPage() {
+    const navigate = useNavigate();
     const { data: workers = [], isLoading } = useGetWorkersQuery();
     const [search, setSearch] = useState('');
     const [roleFilter, setRoleFilter] = useState('All');
     const [statusFilter, setStatusFilter] = useState('All');
+    const [sortAsc, setSortAsc] = useState(true);
+    const [showCreate, setShowCreate] = useState(false);
+    const [editWorker, setEditWorker] = useState<AdminModel | null>(null);
+    const [deleteWorker, setDeleteWorker] = useState<AdminModel | null>(null);
+    const [menuWorkerId, setMenuWorkerId] = useState<string | null>(null);
 
-    const roles = ['All', 'Superadmin', 'Admin', 'Teacher'];
+    const roles = ['All', 'Superadmin', 'Admin', 'Teacher', 'Support'];
     const statuses = ['All', 'Active', 'Inactive'];
 
     const filtered = workers.filter(w => {
@@ -20,8 +37,8 @@ export default function WorkersPage() {
 
         let matchesRole = true;
         if (roleFilter !== 'All') {
-            const roleStr = (w.role || '').toLowerCase();
-            const filterStr = roleFilter.toLowerCase().replace(' ', '');
+            const roleStr = (w.role || '').toLowerCase().replace(/\s+/g, '');
+            const filterStr = roleFilter.toLowerCase().replace(/\s+/g, '');
             matchesRole = roleStr === filterStr;
         }
 
@@ -31,6 +48,10 @@ export default function WorkersPage() {
         }
 
         return matchesSearch && matchesRole && matchesStatus;
+    }).sort((a, b) => {
+        const left = `${a.firstName} ${a.lastName}`.trim();
+        const right = `${b.firstName} ${b.lastName}`.trim();
+        return sortAsc ? left.localeCompare(right) : right.localeCompare(left);
     });
 
     return (
@@ -41,7 +62,11 @@ export default function WorkersPage() {
                     <h1 className="text-[24px] font-extrabold text-[#1A2233] tracking-tight">Employees</h1>
                     <p className="text-[13px] text-[#8A9BB8] font-bold mt-1">Team and access management</p>
                 </div>
-                <button className="w-full sm:w-auto bg-[#ED6A2E] text-white px-5 py-2.5 rounded-xl text-[13px] font-black flex items-center justify-center gap-2 hover:bg-[#D95B24] transition-all shadow-[0_4px_12px_rgba(237,106,46,0.3)]">
+                <button
+                    type="button"
+                    onClick={() => setShowCreate(true)}
+                    className="w-full sm:w-auto bg-[#ED6A2E] text-white px-5 py-2.5 rounded-xl text-[13px] font-black flex items-center justify-center gap-2 hover:bg-[#D95B24] transition-all shadow-[0_4px_12px_rgba(237,106,46,0.3)]"
+                >
                     <UserPlus size={18} strokeWidth={3} />
                     Add employee
                 </button>
@@ -87,9 +112,13 @@ export default function WorkersPage() {
                             </button>
                         ))}
                     </div>
-                    <button className="hidden sm:flex items-center gap-2 px-4 py-2 bg-white border border-[#F0F1F5] rounded-xl text-[12px] font-black text-[#8A9BB8] hover:text-[#5A6376] transition-all shadow-sm">
+                    <button
+                        type="button"
+                        onClick={() => setSortAsc((value) => !value)}
+                        className="hidden sm:flex items-center gap-2 px-4 py-2 bg-white border border-[#F0F1F5] rounded-xl text-[12px] font-black text-[#8A9BB8] hover:text-[#5A6376] transition-all shadow-sm"
+                    >
                         <ArrowUpDown size={14} />
-                        A - Z
+                        {sortAsc ? 'A - Z' : 'Z - A'}
                         <ChevronDown size={14} />
                     </button>
                 </div>
@@ -127,9 +156,33 @@ export default function WorkersPage() {
                                             <div className={`w-1.5 h-1.5 rounded-full ${w.isActive ? 'bg-[#2ECC81]' : 'bg-[#F15F5F]'}`} />
                                             {w.isActive ? 'Active' : 'Inactive'}
                                         </div>
-                                        <button className="p-1 text-[#8A9BB8] hover:text-[#1A2233] transition-colors rounded-lg hover:bg-gray-50">
-                                            <MoreVertical size={18} />
-                                        </button>
+                                        <div className="relative">
+                                            <button
+                                                type="button"
+                                                onClick={() => setMenuWorkerId(menuWorkerId === w.id ? null : w.id)}
+                                                className="p-1 text-[#8A9BB8] hover:text-[#1A2233] transition-colors rounded-lg hover:bg-gray-50"
+                                            >
+                                                <MoreVertical size={18} />
+                                            </button>
+                                            {menuWorkerId === w.id && (
+                                                <div className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-xl border border-[#F0F1F5] bg-white py-1 shadow-xl">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setEditWorker(w); setMenuWorkerId(null); }}
+                                                        className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-bold text-[#5A6376] hover:bg-[#F8F9FB]"
+                                                    >
+                                                        <Pencil size={14} /> Edit
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setDeleteWorker(w); setMenuWorkerId(null); }}
+                                                        className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-bold text-[#E74C3C] hover:bg-red-50"
+                                                    >
+                                                        <Trash2 size={14} /> Delete
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
 
@@ -153,22 +206,213 @@ export default function WorkersPage() {
                                 </div>
 
                                 {/* Footer Action */}
-                                <button className="w-full bg-[#F5F6FA] text-[#1A2233] py-2.5 rounded-xl text-[12px] font-black hover:bg-[#ED6A2E] hover:text-white transition-all shadow-sm border border-[#F0F2F5] hover:border-[#ED6A2E]">
+                                <button
+                                    type="button"
+                                    onClick={() => navigate(`/workers/details/${w.id}`)}
+                                    className="w-full bg-[#F5F6FA] text-[#1A2233] py-2.5 rounded-xl text-[12px] font-black hover:bg-[#ED6A2E] hover:text-white transition-all shadow-sm border border-[#F0F2F5] hover:border-[#ED6A2E]"
+                                >
                                     Profile
                                 </button>
                             </div>
                         ))}
 
                         {/* New Employee Slot */}
-                        <div className="bg-transparent rounded-[24px] border-2 border-dashed border-[#F0F1F5] p-5 flex flex-col items-center justify-center gap-3 transition-all cursor-pointer hover:border-[#ED6A2E] hover:bg-white min-h-[260px] group">
+                        <button
+                            type="button"
+                            onClick={() => setShowCreate(true)}
+                            className="bg-transparent rounded-[24px] border-2 border-dashed border-[#F0F1F5] p-5 flex flex-col items-center justify-center gap-3 transition-all cursor-pointer hover:border-[#ED6A2E] hover:bg-white min-h-[260px] group"
+                        >
                             <div className="w-12 h-12 rounded-2xl bg-[#F7F8FA] flex items-center justify-center text-[#8A9BB8] group-hover:bg-[#FFEEE0] group-hover:text-[#ED6A2E] transition-all">
                                 <Plus size={24} strokeWidth={3} />
                             </div>
                             <span className="text-[13px] font-black text-[#8A9BB8] group-hover:text-[#ED6A2E] transition-all">New employee</span>
-                        </div>
+                        </button>
                     </>
                 )}
             </div>
+
+            {showCreate && <WorkerFormDialog mode="create" onClose={() => setShowCreate(false)} />}
+            {editWorker && (
+                <WorkerFormDialog
+                    mode="edit"
+                    worker={editWorker}
+                    onClose={() => setEditWorker(null)}
+                />
+            )}
+            {deleteWorker && (
+                <WorkerDeleteDialog worker={deleteWorker} onClose={() => setDeleteWorker(null)} />
+            )}
         </div>
+    );
+}
+
+function WorkerFormDialog({
+    mode,
+    worker,
+    onClose,
+}: {
+    mode: 'create' | 'edit';
+    worker?: AdminModel;
+    onClose: () => void;
+}) {
+    const [createWorker, { isLoading: creating }] = useCreateWorkerMutation();
+    const [updateWorker, { isLoading: updating }] = useUpdateWorkerMutation();
+    const [error, setError] = useState('');
+    const toast = useToast();
+    const [form, setForm] = useState({
+        username: '',
+        firstName: worker?.firstName ?? '',
+        lastName: worker?.lastName ?? '',
+        role: worker?.role || 'admin',
+        phoneNumber: worker?.phoneNumber ?? '',
+        password: '',
+        isActive: worker?.isActive ?? true,
+    });
+
+    const isLoading = creating || updating;
+
+    const submit = async (event: React.FormEvent) => {
+        event.preventDefault();
+        setError('');
+        if (!form.firstName.trim()) return;
+        if (mode === 'create' && !form.password.trim()) return;
+
+        try {
+            if (mode === 'create') {
+                await createWorker({
+                    username: form.username.trim() || undefined,
+                    firstName: form.firstName.trim(),
+                    lastName: form.lastName.trim(),
+                    role: form.role,
+                    phoneNumber: form.phoneNumber.trim() || undefined,
+                    password: form.password,
+                    isActive: form.isActive,
+                }).unwrap();
+                toast.success('Employee created successfully');
+            } else if (worker) {
+                await updateWorker({
+                    id: worker.id,
+                    firstName: form.firstName.trim(),
+                    lastName: form.lastName.trim(),
+                    role: form.role,
+                    phoneNumber: form.phoneNumber.trim() || undefined,
+                    isActive: form.isActive,
+                    password: form.password.trim() || undefined,
+                }).unwrap();
+                toast.success('Employee updated successfully');
+            }
+            onClose();
+        } catch (err) {
+            setError(formatApiError(err, 'Could not save employee.'));
+            toast.error(formatApiError(err, 'Could not save employee.'));
+        }
+    };
+
+    return (
+        <ModalShell title={mode === 'create' ? 'New employee' : 'Edit employee'} onClose={onClose}>
+            <form onSubmit={submit} className="space-y-4 p-5">
+                {error && (
+                    <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-semibold text-red-700">
+                        {error}
+                    </p>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                    <input value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} placeholder="First name *" className="rounded-xl border border-[#F0F1F5] px-4 py-3 text-[13px] font-bold outline-none focus:border-[#ED6A2E]" required />
+                    <input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="Last name" className="rounded-xl border border-[#F0F1F5] px-4 py-3 text-[13px] font-bold outline-none focus:border-[#ED6A2E]" />
+                </div>
+                {mode === 'create' && (
+                    <input
+                        value={form.username}
+                        onChange={(e) => setForm({ ...form, username: e.target.value })}
+                        placeholder="Username (optional — auto from phone)"
+                        className="w-full rounded-xl border border-[#F0F1F5] px-4 py-3 text-[13px] font-bold outline-none focus:border-[#ED6A2E]"
+                    />
+                )}
+                <input value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })} placeholder="Phone" className="w-full rounded-xl border border-[#F0F1F5] px-4 py-3 text-[13px] font-bold outline-none focus:border-[#ED6A2E]" />
+                <CustomSelect
+                    value={form.role}
+                    onChange={(v) => setForm({ ...form, role: v || 'admin' })}
+                    options={[
+                        { value: 'admin', label: 'Admin' },
+                        { value: 'teacher', label: 'Teacher' },
+                        { value: 'superadmin', label: 'Superadmin' },
+                        { value: 'support', label: 'Support' },
+                    ]}
+                    placeholder="Role"
+                />
+                <label className="flex items-center gap-2 text-[13px] font-bold text-[#5A6376]">
+                    <input
+                        type="checkbox"
+                        checked={form.isActive}
+                        onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+                        className="rounded border-[#F0F1F5]"
+                    />
+                    Active
+                </label>
+                <input
+                    type="password"
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    placeholder={mode === 'create' ? 'Password *' : 'New password (leave empty to keep)'}
+                    className="w-full rounded-xl border border-[#F0F1F5] px-4 py-3 text-[13px] font-bold outline-none focus:border-[#ED6A2E]"
+                    required={mode === 'create'}
+                    minLength={mode === 'create' ? 6 : undefined}
+                />
+                <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={onClose} className="rounded-xl px-4 py-2.5 text-[13px] font-bold text-[#8A9BB8] hover:bg-gray-50">Cancel</button>
+                    <button
+                        type="submit"
+                        disabled={isLoading || !form.firstName.trim() || (mode === 'create' && !form.password.trim())}
+                        className="rounded-xl bg-[#ED6A2E] px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"
+                    >
+                        {isLoading ? 'Saving...' : mode === 'create' ? 'Create' : 'Save'}
+                    </button>
+                </div>
+            </form>
+        </ModalShell>
+    );
+}
+
+function WorkerDeleteDialog({ worker, onClose }: { worker: AdminModel; onClose: () => void }) {
+    const [deleteWorker, { isLoading }] = useDeleteWorkerMutation();
+    const [error, setError] = useState('');
+    const toast = useToast();
+
+    const submit = async () => {
+        setError('');
+        try {
+            await deleteWorker(worker.id).unwrap();
+            toast.success('Employee deleted successfully');
+            onClose();
+        } catch (err) {
+            setError(formatApiError(err, 'Could not delete employee.'));
+            toast.error(formatApiError(err, 'Could not delete employee.'));
+        }
+    };
+
+    return (
+        <ModalShell title="Delete employee?" onClose={onClose}>
+            <div className="space-y-4 p-5">
+                <p className="text-[13px] font-semibold text-[#5A6376]">
+                    Remove <strong>{worker.firstName} {worker.lastName}</strong> from the team?
+                </p>
+                {error && (
+                    <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-semibold text-red-700">
+                        {error}
+                    </p>
+                )}
+                <div className="flex justify-end gap-2">
+                    <button type="button" onClick={onClose} className="rounded-xl px-4 py-2.5 text-[13px] font-bold text-[#8A9BB8] hover:bg-gray-50">Cancel</button>
+                    <button
+                        type="button"
+                        onClick={submit}
+                        disabled={isLoading}
+                        className="rounded-xl bg-[#E74C3C] px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50"
+                    >
+                        {isLoading ? 'Deleting...' : 'Delete'}
+                    </button>
+                </div>
+            </div>
+        </ModalShell>
     );
 }

@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useGetTariffsQuery, useCreateTariffMutation, useDeleteTariffMutation } from '../../store/api/salaryApi';
+import { MODAL_OVERLAY_CLASS, MODAL_PANEL_CLASS } from '../../components/common/modalStyles';
+import { useToast } from '../../hooks/useToast';
 
 export default function TariffPage() {
     const { data: tariffs = [], isLoading } = useGetTariffsQuery();
     const [createTariff] = useCreateTariffMutation();
     const [deleteTariff] = useDeleteTariffMutation();
+    const toast = useToast();
     const [showModal, setShowModal] = useState(false);
     const [form, setForm] = useState({
         name: '',
@@ -20,6 +23,7 @@ export default function TariffPage() {
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         await createTariff(form).unwrap();
+        toast.success('Tariff created successfully');
         setShowModal(false);
         setForm({ name: '', price: '', durationMonths: 1, type: '', description: '', isActive: true, isPopular: false });
     };
@@ -50,7 +54,10 @@ export default function TariffPage() {
                                 <p className="text-xs text-text-secondary mt-1">{t.durationLabel ?? `${t.durationMonths} mo.`}</p>
                                 {t.type && <p className="text-xs text-text-secondary">{t.type}</p>}
                             </div>
-                            <button onClick={() => deleteTariff(t.id!)} className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 transition-colors">
+                            <button onClick={async () => {
+                                await deleteTariff(t.id!).unwrap();
+                                toast.success('Tariff deleted successfully');
+                            }} className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 transition-colors">
                                 <Trash2 size={14} />
                             </button>
                         </div>
@@ -60,8 +67,8 @@ export default function TariffPage() {
             )}
 
             {showModal && (
-                <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+                <div className={MODAL_OVERLAY_CLASS}>
+                    <div className={`rounded-2xl w-full max-w-md ${MODAL_PANEL_CLASS}`}>
                         <div className="p-6 border-b">
                             <h2 className="text-lg font-bold">Add tariff</h2>
                         </div>

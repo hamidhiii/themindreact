@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     useGetStatsQuery,
     useGetFinanceQuery,
@@ -6,273 +7,508 @@ import {
     useGetDebtorsQuery,
     useGetTrialLessonsQuery,
     useGetAbsentQuery,
-    useGetWeeklyQuery
+    useGetWeeklyQuery,
+    useSendRemindersMutation,
 } from '../../store/api/dashboardApi';
+import { useGetStudentsQuery, useGetStudentDashboardQuery } from '../../store/api/studentApi';
+import StudentListDialog, { type StudentListEntry } from '../../components/common/dialogs/StudentListDialog';
+import HomeAttendanceChart from './sections/HomeAttendanceChart';
+import { useToast } from '../../hooks/useToast';
 import {
-    UserPlus, Users, Hourglass, CheckCircle,
-    ChevronRight, CalendarDays, AlertCircle, UserMinus,
-    DollarSign
+    ChevronRight, CalendarDays, AlertTriangle, UserX,
+    FileText, GraduationCap, CalendarCheck, BadgeCheck,
 } from 'lucide-react';
 import {
-    BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell
+    BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
-import HomeAttendanceChart from './sections/HomeAttendanceChart';
-import HomeSalesFunnel from './sections/HomeSalesFunnel';
-import HomeRoomsSection from './sections/HomeRoomsSection';
-import HomeBooksSection from './sections/HomeBooksSection';
 
-const COLORS = {
-    purple: '#6B7FD4',
-    orange: '#ED6A2E',
-    green: '#2ECC8A',
-    dark: '#1A2233',
-    grey: '#8A9BB8',
-    bgLight: '#F5F6FA'
-};
+const ORANGE = '#F37021';
 
-const HomeAnalyticsCard = ({ title, value, trend, icon: Icon, color }: any) => (
-    <div className="bg-white p-6 rounded-2xl border border-[#F0F1F5] shadow-[0_2px_12px_rgba(26,34,51,0.04)] flex items-start justify-between min-h-[145px]">
-        <div className="flex flex-col h-full justify-between">
-            <div>
-                <p className="text-[14px] font-bold text-[#8A9BB8] leading-none mb-4 uppercase tracking-wider">{title}</p>
-                <div className="flex items-baseline gap-2">
-                    <h2 className="text-[28px] font-extrabold text-[#1A2233] leading-none">{value}</h2>
-                </div>
-            </div>
-            <div className="flex items-center gap-1 mt-auto">
-                <span className={`text-[12px] font-bold ${trend.startsWith('+') ? 'text-[#2ECC81]' : 'text-[#E74C3C]'}`}>
-                    {trend}
-                </span>
-            </div>
-        </div>
-        <div className="w-10 h-10 flex items-center justify-center rounded-xl" style={{ backgroundColor: `${color}1A` }}>
-            <Icon size={22} style={{ color: color }} />
-        </div>
-    </div>
-);
+function formatUzs(value: number): string {
+    return `${Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} UZS`;
+}
 
-const MiniListCard = ({ title, icon: Icon, data, count, color }: any) => (
-    <div className="bg-white p-5 rounded-2xl border border-[#F0F1F5] shadow-[0_2px_12px_rgba(26,34,51,0.04)]">
-        <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${color}1A` }}>
-                    <Icon size={20} style={{ color: color }} />
-                </div>
-                <h3 className="text-[15px] font-extrabold text-[#1A2233]">{title}</h3>
-            </div>
-            <div className="bg-[#F5F6FA] text-[#8A9BB8] px-3 py-1 rounded-lg flex items-center gap-1.5 cursor-pointer hover:bg-gray-100 transition-colors">
-                <span className="text-[12px] font-bold">{count}</span>
-                <ChevronRight size={14} />
-            </div>
-        </div>
+interface HomeStudent {
+    id?: number;
+    studentId?: number;
+    full_name?: string;
+    name?: string;
+    first_name?: string;
+    last_name?: string;
+    phone?: string;
+    phone_number?: string;
+    group?: string;
+    group_name?: string;
+}
 
-        <div className="space-y-4">
-            {(Array.isArray(data) ? data : []).slice(0, 3).map((item: any, i: number) => (
-                <div key={i} className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-[#ED6A2E]/10 flex items-center justify-center shrink-0">
-                        <span className="text-[#ED6A2E] text-xs font-black uppercase">{(String(item.full_name || item.name || 'T')[0])}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-bold text-[#1A2233] truncate leading-tight">{item.full_name || item.name || 'Student'}</p>
-                        <p className="text-[10px] text-[#8A9BB8] font-medium mt-0.5">{item.phone || '+998 -- --- -- --'}</p>
-                    </div>
-                </div>
-            ))}
-            {(!Array.isArray(data) || data.length === 0) && <p className="text-center py-4 text-[#8A9BB8] text-[10px] font-black uppercase tracking-widest italic">All caught up</p>}
-        </div>
-    </div>
-);
+function toEntries(list: HomeStudent[]): StudentListEntry[] {
+    return list.map((s, i) => {
+        const id = String(s.id ?? s.studentId ?? i);
+        const name =
+            s.full_name ||
+            s.name ||
+            `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim() ||
+            'Unknown';
+        const phone = s.phone ?? s.phone_number;
+        const group = s.group_name ?? s.group;
+        const studentId = s.id ?? s.studentId;
+        const href = studentId != null ? `/student-details/${studentId}` : undefined;
+        return { id, name, phone, group, href };
+    });
+}
 
 export default function HomePage() {
-    const { data: stats } = useGetStatsQuery();
+    const navigate = useNavigate();
+    const { data: stats, isLoading: statsLoading } = useGetStatsQuery();
     const { data: trialStats } = useGetTrialStatsQuery();
     const { data: finance } = useGetFinanceQuery();
-    const { data: debtors } = useGetDebtorsQuery();
+    const { data: debtors = [] } = useGetDebtorsQuery();
     const { data: trials } = useGetTrialLessonsQuery();
     const { data: absents } = useGetAbsentQuery();
     const { data: weekly } = useGetWeeklyQuery();
+    const { data: students = [] } = useGetStudentsQuery();
+    const { data: studentDashboard } = useGetStudentDashboardQuery();
 
-    const analytics = [
-        { title: 'Total Leads', value: stats?.leads ?? 0, trend: '+12% from month', icon: UserPlus, color: '#4C6FFF' },
-        { title: 'Active Students', value: stats?.students ?? 0, trend: '+5% from month', icon: Users, color: '#2ECC81' },
-        { title: 'Trial Coming', value: trialStats?.coming ?? 0, trend: 'Next 7 days', icon: Hourglass, color: '#F39C12' },
-        { title: 'New Today', value: stats?.newStudents ?? 0, trend: 'Leads registered', icon: CheckCircle, color: '#9B59B6' },
-    ];
+    const studentCount = stats?.students
+        || studentDashboard?.cards.activeStudents
+        || 0;
+    const newStudentsCount = stats?.newStudents ?? 0;
+    const debtorsCount = debtors.length || studentDashboard?.cards.debtors || 0;
 
     const chartData = useMemo(() => {
         if (!weekly || weekly.length === 0) {
             return [
                 { name: 'M', value: 0 }, { name: 'T', value: 0 }, { name: 'W', value: 0 },
-                { name: 'T', value: 0 }, { name: 'F', value: 0 }, { name: 'S', value: 0 }, { name: 'S', value: 0 }
+                { name: 'T', value: 0 }, { name: 'F', value: 0 }, { name: 'S', value: 0 }, { name: 'S', value: 0 },
             ];
         }
-        return weekly.map(w => ({
+        return weekly.map((w) => ({
             name: new Date(w.date).toLocaleDateString('en-US', { weekday: 'narrow' }),
-            value: Number(w.count || 0)
+            value: Number(w.count || 0),
         }));
     }, [weekly]);
 
-    const receivedAmount = Number(finance?.paid || 0);
-    const expectedAmount = Number(finance?.expected || receivedAmount * 1.25 || 2500000);
-    const progress = Math.min(100, Math.round((receivedAmount / expectedAmount) * 100)) || 0;
+    const hasChartData = chartData.some((d) => d.value > 0);
+
+    const expectedAmount = Number(finance?.expected ?? 0);
+    const receivedAmount = Number(finance?.paid ?? 0);
+    const remainingAmount = Number(finance?.remaining ?? Math.max(0, expectedAmount - receivedAmount));
+    const progress = finance?.progress != null
+        ? Math.min(100, Math.round(finance.progress))
+        : expectedAmount > 0
+            ? Math.min(100, Math.round((receivedAmount / expectedAmount) * 100))
+            : 0;
+
+    const studentEntries = useMemo(
+        () =>
+            students.map((s) => ({
+                id: String(s.id ?? ''),
+                name: `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() || `Student #${s.id}`,
+                phone: s.phone,
+                group: s.groupName,
+                href: s.id != null ? `/student-details/${s.id}` : undefined,
+            })),
+        [students],
+    );
+
+    const debtorsList = (debtors ?? []) as unknown as HomeStudent[];
+
+    const [studentsDialogOpen, setStudentsDialogOpen] = useState(false);
+    const [debtorsDialogOpen, setDebtorsDialogOpen] = useState(false);
+
+    const topStats = [
+        {
+            title: 'Students',
+            value: studentCount,
+            icon: GraduationCap,
+            color: '#4C6FFF',
+            onClick: () => setStudentsDialogOpen(true),
+            loading: statsLoading && !studentCount,
+        },
+        {
+            title: 'Trial Lessons',
+            value: trialStats?.coming ?? 0,
+            icon: CalendarCheck,
+            color: ORANGE,
+        },
+        {
+            title: 'New Students',
+            value: newStudentsCount,
+            icon: BadgeCheck,
+            color: '#9B59B6',
+        },
+        {
+            title: 'Debtors',
+            value: debtorsCount,
+            icon: AlertTriangle,
+            color: '#E74C3C',
+            onClick: () => setDebtorsDialogOpen(true),
+        },
+    ];
 
     return (
-        <div className="space-y-6 animate-in fade-in duration-500">
-            {/* Page Header */}
-            <div>
-                <h1 className="text-[24px] font-extrabold text-[#1A2233] tracking-tight">Overview Dashboard</h1>
-                <p className="text-[13px] text-[#8A9BB8] font-bold mt-1">Real-time center performance metrics</p>
+        <div className="space-y-4 animate-in fade-in duration-500">
+            <div className="lg:hidden">
+                <h1 className="text-[18px] font-extrabold text-[#1A2233] tracking-tight leading-tight">
+                    Overview of indicators
+                </h1>
+                <p className="text-[11px] text-[#8A9BB8] font-semibold mt-0.5">
+                    Trial lessons today · New active students this month
+                </p>
             </div>
 
-            {/* Top Row: Analytics Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
-                {analytics.map((card, i) => (
-                    <HomeAnalyticsCard key={i} {...card} />
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {topStats.map((card) => (
+                    <StatCard key={card.title} {...card} />
                 ))}
             </div>
 
-            {/* Middle Row: Trial Lessons & Finance */}
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                <div className="lg:col-span-4 bg-white p-7 rounded-[24px] border border-[#F0F1F5] shadow-[0_2px_12px_rgba(26,34,51,0.04)]">
-                    <div className="flex items-center justify-between mb-8">
-                        <div>
-                            <h3 className="text-[17px] font-extrabold text-[#1A2233]">Trial Lessons Flow</h3>
-                            <p className="text-[12px] text-[#8A9BB8] font-bold mt-1">Activity distribution for the current week</p>
-                        </div>
-                        <div className="bg-[#ED6A2E]/10 text-[#ED6A2E] px-4 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1.5 shadow-sm">
-                            <CalendarDays size={14} />
-                            LIVE FEED
-                        </div>
+            <div className="flex flex-col lg:flex-row gap-3 items-stretch">
+                <div className="flex-1 min-w-0 bg-white p-5 rounded-[18px] border border-[#F0F1F5] shadow-[0_2px_12px_rgba(26,34,51,0.04)]">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-[15px] font-extrabold text-[#1A2233]">Trial Lessons</h3>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFF5F0] px-2.5 py-1 text-[10px] font-bold text-[#F37021]">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#F37021]" />
+                            This Week
+                        </span>
                     </div>
 
-                    {/* Stats Blocks */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-5">
                         {[
-                            { label: 'ENROLLED', value: trialStats?.enrolled ?? 0, color: '#4C6FFF' },
-                            { label: 'EXPECTED', value: trialStats?.coming ?? 0, color: '#ED6A2E' },
-                            { label: 'CAME', value: trialStats?.arrived ?? trialStats?.came ?? 0, color: '#2ECC81' },
-                            { label: 'TOTAL', value: trialStats?.total ?? 0, color: '#1A2233' },
-                        ].map((s, i) => (
-                            <div key={i} className="rounded-2xl p-5 flex flex-col items-center justify-center py-8 border border-[#F0F1F5] bg-[#F9FAFC] group hover:border-[#ED6A2E]/30 transition-all">
-                                <span className="text-[10px] font-black tracking-widest leading-none mb-3 text-[#8A9BB8] uppercase group-hover:text-[#ED6A2E]">{s.label}</span>
-                                <span className="text-[28px] font-black leading-none text-[#1A2233]" style={{ color: i === 3 ? '#1A2233' : s.color }}>{s.value}</span>
+                            { label: 'ENROLLED', value: trialStats?.enrolled ?? 0, bg: '#F3EEFF', color: '#9B59B6' },
+                            { label: 'COMING', value: trialStats?.coming ?? 0, bg: '#FFF5F0', color: ORANGE },
+                            { label: 'ARRIVED', value: trialStats?.arrived ?? 0, bg: '#ECFDF5', color: '#2ECC8A' },
+                            { label: 'TOTAL', value: trialStats?.total ?? 0, bg: '#1A2233', color: '#fff' },
+                        ].map((s) => (
+                            <div
+                                key={s.label}
+                                className="rounded-xl px-3 py-3.5 flex flex-col items-center justify-center min-h-[80px]"
+                                style={{ backgroundColor: s.bg }}
+                            >
+                                <span
+                                    className="text-[9px] font-black tracking-[0.12em] mb-2"
+                                    style={{ color: s.label === 'TOTAL' ? 'rgba(255,255,255,0.65)' : s.color }}
+                                >
+                                    {s.label}
+                                </span>
+                                <span
+                                    className="text-[24px] font-black leading-none"
+                                    style={{ color: s.color }}
+                                >
+                                    {s.value}
+                                </span>
                             </div>
                         ))}
                     </div>
 
-                    {/* Weekly Chart */}
-                    <div className="h-[200px] w-full mt-4">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                                <XAxis
-                                    dataKey="name"
-                                    axisLine={false}
-                                    tickLine={false}
-                                    tick={{ fontSize: 11, fill: '#8A9BB8', fontWeight: 800 }}
-                                    dy={10}
-                                />
-                                <Bar dataKey="value" radius={[6, 6, 0, 0]} barSize={40}>
-                                    {chartData.map((_entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={index === chartData.length - 1 ? '#ED6A2E' : '#ED6A2E20'} className="hover:fill-[#ED6A2E] transition-colors" />
-                                    ))}
-                                </Bar>
-                                <Tooltip
-                                    cursor={{ fill: 'transparent' }}
-                                    content={({ active, payload }) => {
-                                        if (active && payload && payload.length) {
-                                            return (
-                                                <div className="bg-[#1A2233] text-white px-3 py-1.5 rounded-lg text-[11px] font-black shadow-xl">
-                                                    {payload[0].value} Lessons
-                                                </div>
-                                            );
-                                        }
-                                        return null;
-                                    }}
-                                />
-                            </BarChart>
-                        </ResponsiveContainer>
+                    <div className="h-[120px] w-full">
+                        {!hasChartData ? (
+                            <div className="h-full flex items-center text-[11px] font-semibold text-[#8A9BB8]">
+                                Weekly chart has no data yet.
+                            </div>
+                        ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                                    <XAxis
+                                        dataKey="name"
+                                        axisLine={false}
+                                        tickLine={false}
+                                        tick={{ fontSize: 10, fill: '#8A9BB8', fontWeight: 700 }}
+                                        dy={10}
+                                    />
+                                    <Bar dataKey="value" radius={[6, 6, 0, 0]} barSize={32}>
+                                        {chartData.map((_entry, index) => (
+                                            <Cell
+                                                key={`cell-${index}`}
+                                                fill={index === chartData.length - 1 ? ORANGE : `${ORANGE}33`}
+                                            />
+                                        ))}
+                                    </Bar>
+                                    <Tooltip
+                                        cursor={{ fill: 'transparent' }}
+                                        content={({ active, payload }) => {
+                                            if (active && payload?.length) {
+                                                return (
+                                                    <div className="bg-[#1A2233] text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-xl">
+                                                        {payload[0].value} lessons
+                                                    </div>
+                                                );
+                                            }
+                                            return null;
+                                        }}
+                                    />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        )}
                     </div>
                 </div>
 
-                {/* Financial Plan Card */}
-                <div className="lg:col-span-1 bg-[#ED6A2E] rounded-[24px] p-7 shadow-[0_15px_40px_rgba(237,106,46,0.3)] flex flex-col justify-between overflow-hidden relative min-h-[460px] group">
-                    <div className="absolute top-0 right-0 w-40 h-40 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl" />
-
+                <div
+                    className="w-full lg:w-[300px] lg:max-w-[300px] shrink-0 rounded-[18px] p-3.5 flex flex-col justify-between shadow-[0_15px_40px_rgba(243,112,33,0.22)] min-h-[280px]"
+                    style={{ backgroundColor: ORANGE }}
+                >
                     <div>
-                        <div className="bg-white/10 backdrop-blur-md self-start inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/5 mb-8">
-                            <span className="text-white text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                                <DollarSign size={12} />
-                                Revenue Target
+                        <div className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-2 py-1 mb-4">
+                            <FileText size={10} className="text-white/90" />
+                            <span className="text-white text-[8px] font-black uppercase tracking-[0.12em]">
+                                Financial Plan
                             </span>
                         </div>
-                        <p className="text-white/70 text-[12px] font-bold mb-2">Target for current month</p>
-                        <h2 className="text-white text-[28px] font-black leading-tight mb-10">{expectedAmount.toLocaleString()} UZS</h2>
 
-                        <div className="space-y-8">
-                            <div>
-                                <div className="flex justify-between items-end mb-3">
-                                    <span className="text-white text-[13px] font-bold">Progress</span>
-                                    <span className="text-white text-[18px] font-black">{progress}%</span>
-                                </div>
-                                <div className="h-2.5 w-full bg-black/10 rounded-full overflow-hidden border border-white/5">
-                                    <div className="h-full bg-white shadow-[0_0_15px_white] transition-all duration-1000 ease-out" style={{ width: `${progress}%` }} />
-                                </div>
+                        <p className="text-white/75 text-[9px] font-semibold mb-0.5 leading-snug">Expected payment amount</p>
+                        <h2 className="text-white text-[17px] font-black leading-tight mb-4 tracking-tight break-words">
+                            {formatUzs(expectedAmount)}
+                        </h2>
+
+                        <div className="mb-4">
+                            <div className="flex justify-between items-center mb-1.5 gap-1">
+                                <span className="text-white/85 text-[9px] font-semibold leading-tight">Collection progress</span>
+                                <span className="text-white text-[10px] font-black shrink-0">{progress}%</span>
                             </div>
+                            <div className="h-[3px] w-full bg-white/25 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-white rounded-full transition-all duration-700"
+                                    style={{ width: `${progress}%` }}
+                                />
+                            </div>
+                        </div>
 
-                            <div className="grid grid-cols-1 gap-6">
-                                <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-                                    <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mb-1">Received</p>
-                                    <p className="text-white text-[18px] font-black italic">{receivedAmount.toLocaleString()} UZS</p>
-                                </div>
-                                <div className="bg-black/5 p-4 rounded-2xl">
-                                    <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mb-1">Balance Remaining</p>
-                                    <p className="text-white/80 text-[14px] font-bold">{Math.max(0, expectedAmount - receivedAmount).toLocaleString()} UZS</p>
-                                </div>
+                        <div className="space-y-3">
+                            <div>
+                                <p className="text-white/55 text-[9px] font-semibold mb-0.5">Received</p>
+                                <p className="text-white text-[11px] font-black leading-tight break-words">{formatUzs(receivedAmount)}</p>
+                            </div>
+                            <div className="border-t border-white/20 pt-3">
+                                <p className="text-white/55 text-[9px] font-semibold mb-0.5">Remaining</p>
+                                <p className="text-white text-[11px] font-black leading-tight break-words">{formatUzs(remainingAmount)}</p>
                             </div>
                         </div>
                     </div>
 
-                    <button className="w-full bg-white text-[#ED6A2E] py-4 rounded-2xl text-[14px] font-black shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all group mt-8">
-                        View Detailed Report
+                    <button
+                        type="button"
+                        onClick={() => navigate('/transactions')}
+                        className="w-full mt-4 bg-white text-[#F37021] py-2 rounded-xl text-[10px] font-black hover:bg-white/95 transition-colors"
+                    >
+                        Open finances
                     </button>
                 </div>
             </div>
 
-            {/* Bottom Row: Mini Lists */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <MiniListCard
-                    title="Trial Students"
-                    icon={CalendarDays}
-                    data={trials}
-                    count={trials?.length ?? 0}
-                    color="#4C6FFF"
-                />
-                <MiniListCard
-                    title="Active Debtors"
-                    icon={AlertCircle}
-                    data={debtors}
-                    count={debtors?.length ?? 0}
-                    color="#F15F5F"
-                />
-                <MiniListCard
-                    title="Absent Today"
-                    icon={UserMinus}
-                    data={absents}
-                    count={absents?.length ?? 0}
-                    color="#1A2233"
-                />
-            </div>
+            <HomeAttendanceChart />
 
-            {/* New Sections (Books, Sales Funnel, Rooms, Attendance) */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <HomeBooksSection />
-                <HomeSalesFunnel />
-            </div>
+            <BottomWidgets
+                trials={(trials ?? []) as unknown as HomeStudent[]}
+                debtors={debtorsList}
+                absents={(absents ?? []) as unknown as HomeStudent[]}
+            />
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <HomeAttendanceChart />
-                <HomeRoomsSection />
-            </div>
+            {studentsDialogOpen && (
+                <StudentListDialog
+                    title="Students"
+                    subtitle={`${studentEntries.length} students total`}
+                    icon={GraduationCap}
+                    iconBg="#9B59B61A"
+                    iconColor="#9B59B6"
+                    students={studentEntries}
+                    onClose={() => setStudentsDialogOpen(false)}
+                />
+            )}
+
+            {debtorsDialogOpen && (
+                <StudentListDialog
+                    title="Debtors"
+                    subtitle={debtorsList.length === 0 ? 'No debtor records in the list' : `${debtorsList.length} debtors`}
+                    icon={AlertTriangle}
+                    iconBg="#E74C3C1A"
+                    iconColor="#E74C3C"
+                    students={toEntries(debtorsList)}
+                    onClose={() => setDebtorsDialogOpen(false)}
+                />
+            )}
         </div>
+    );
+}
+
+function StatCard({
+    title,
+    value,
+    icon: Icon,
+    color,
+    onClick,
+    loading,
+}: {
+    title: string;
+    value: number;
+    icon: typeof GraduationCap;
+    color: string;
+    onClick?: () => void;
+    loading?: boolean;
+}) {
+    const Wrapper = onClick ? 'button' : 'div';
+    return (
+        <Wrapper
+            type={onClick ? 'button' : undefined}
+            onClick={onClick}
+            className={`bg-white p-4 rounded-[18px] border border-[#F0F1F5] shadow-[0_2px_12px_rgba(26,34,51,0.04)] flex items-start justify-between text-left min-h-[96px] ${
+                onClick ? 'hover:border-[#F37021]/30 transition-colors cursor-pointer' : ''
+            }`}
+        >
+            <div>
+                <p className="text-[11px] font-bold text-[#8A9BB8] mb-2">{title}</p>
+                <p className="text-[26px] font-black text-[#1A2233] leading-none">
+                    {loading ? '…' : value}
+                </p>
+            </div>
+            <div
+                className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                style={{ backgroundColor: `${color}1A` }}
+            >
+                <Icon size={18} style={{ color }} />
+            </div>
+        </Wrapper>
+    );
+}
+
+function BottomWidgets({
+    trials,
+    debtors,
+    absents,
+}: {
+    trials: HomeStudent[];
+    debtors: HomeStudent[];
+    absents: HomeStudent[];
+}) {
+    type DialogKind = 'trial' | 'debtors' | 'absent' | null;
+    const [open, setOpen] = useState<DialogKind>(null);
+    const [sendReminders, { isLoading: sendingReminders }] = useSendRemindersMutation();
+    const toast = useToast();
+
+    const handleSendReminders = async (kind: 'debtors' | 'absent' | 'trial') => {
+        const audience = kind === 'trial' ? 'new' : 'active';
+        try {
+            await sendReminders({ audience }).unwrap();
+            toast.success('Reminders sent successfully');
+        } catch {
+            toast.error('Could not send reminders');
+        }
+    };
+
+    const widgets = [
+        {
+            kind: 'trial' as const,
+            title: 'Trial lessons (today)',
+            count: trials.length,
+            icon: CalendarDays,
+            iconColor: ORANGE,
+            badgeBg: '#EEF2FF',
+            badgeColor: '#4C6FFF',
+        },
+        {
+            kind: 'debtors' as const,
+            title: 'Debtors',
+            count: debtors.length,
+            icon: AlertTriangle,
+            iconColor: '#E74C3C',
+            badgeBg: '#FFF5F0',
+            badgeColor: '#F37021',
+        },
+        {
+            kind: 'absent' as const,
+            title: 'Absent',
+            count: absents.length,
+            icon: UserX,
+            iconColor: '#8A9BB8',
+            badgeBg: '#F0F2F7',
+            badgeColor: '#8A9BB8',
+        },
+    ];
+
+    return (
+        <>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {widgets.map((w) => {
+                    const Icon = w.icon;
+                    return (
+                        <div
+                            key={w.kind}
+                            className="bg-white rounded-[18px] border border-[#F0F1F5] shadow-[0_2px_12px_rgba(26,34,51,0.04)] p-5 flex flex-col min-h-[178px]"
+                        >
+                            <button
+                                type="button"
+                                onClick={() => setOpen(w.kind)}
+                                className="flex items-center justify-between mb-0 group w-full text-left"
+                            >
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <Icon size={17} style={{ color: w.iconColor }} className="shrink-0" />
+                                    <span className="text-[13px] font-extrabold text-[#1A2233] truncate">{w.title}</span>
+                                </div>
+                                <span
+                                    className="flex items-center gap-0.5 text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0 ml-2 group-hover:opacity-80 transition-opacity"
+                                    style={{ backgroundColor: w.badgeBg, color: w.badgeColor }}
+                                >
+                                    {w.count}
+                                    <ChevronRight size={12} strokeWidth={2.5} />
+                                </span>
+                            </button>
+
+                            <div className="flex-1 flex items-center justify-center py-6">
+                                <p className="text-[11px] font-semibold text-[#8A9BB8]">
+                                    {w.count === 0 ? 'No data' : `${w.count} students`}
+                                </p>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={() => handleSendReminders(w.kind)}
+                                disabled={sendingReminders}
+                                className="w-full rounded-xl border border-[#E8EBF2] bg-white py-2.5 text-[11px] font-bold text-[#5A6376] hover:bg-[#F8F9FB] disabled:opacity-50 transition-colors"
+                            >
+                                Send reminders
+                            </button>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {open === 'trial' && (
+                <StudentListDialog
+                    title="Trial lessons (today)"
+                    subtitle={`${trials.length} students`}
+                    icon={CalendarDays}
+                    iconBg="#FFF5F0"
+                    iconColor={ORANGE}
+                    students={toEntries(trials)}
+                    placeholder="Search by name or group..."
+                    onClose={() => setOpen(null)}
+                />
+            )}
+            {open === 'debtors' && (
+                <StudentListDialog
+                    title="Debtors"
+                    subtitle={debtors.length === 0 ? 'No debtor records in the list' : `${debtors.length} debtors`}
+                    icon={AlertTriangle}
+                    iconBg="#E74C3C1A"
+                    iconColor="#E74C3C"
+                    students={toEntries(debtors)}
+                    onClose={() => setOpen(null)}
+                    onSendReminders={() => handleSendReminders('debtors')}
+                    sendReminderLoading={sendingReminders}
+                />
+            )}
+            {open === 'absent' && (
+                <StudentListDialog
+                    title="Absent"
+                    subtitle={absents.length === 0 ? 'No absent students' : `${absents.length} students`}
+                    icon={UserX}
+                    iconBg="#F0F2F71A"
+                    iconColor="#8A9BB8"
+                    students={toEntries(absents)}
+                    onClose={() => setOpen(null)}
+                    onSendReminders={() => handleSendReminders('absent')}
+                    sendReminderLoading={sendingReminders}
+                />
+            )}
+        </>
     );
 }

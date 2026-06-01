@@ -7,6 +7,8 @@ import {
   useDeleteSettingsRoomMutation,
 } from '../../store/api/settingsApi';
 import type { RoomSettingModel } from '../../types';
+import { MODAL_OVERLAY_CLASS, MODAL_PANEL_CLASS } from '../../components/common/modalStyles';
+import { useToast } from '../../hooks/useToast';
 
 const PRESET_COLORS = ['#ED6A2E', '#4C6FFF', '#2ECC81', '#9B59B6', '#F39C12', '#E74C3C', '#1ABC9C', '#3498DB'];
 
@@ -16,6 +18,7 @@ export default function RoomsPage() {
   const [showForm, setShowForm] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<RoomSettingModel | null>(null);
   const [deleteRoom] = useDeleteSettingsRoomMutation();
+  const toast = useToast();
 
   return (
     <div className="space-y-6">
@@ -94,8 +97,8 @@ export default function RoomsPage() {
       )}
 
       {confirmDelete && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+        <div className={MODAL_OVERLAY_CLASS}>
+          <div className={`rounded-2xl w-full max-w-sm p-6 ${MODAL_PANEL_CLASS}`}>
             <div className="flex items-center gap-2 mb-3">
               <AlertTriangle size={20} className="text-[#E74C3C]" />
               <h2 className="text-[16px] font-extrabold text-[#1A2233]">Confirm delete</h2>
@@ -108,7 +111,11 @@ export default function RoomsPage() {
                 Cancel
               </button>
               <button
-                onClick={async () => { await deleteRoom(confirmDelete.id); setConfirmDelete(null); }}
+                onClick={async () => {
+                  await deleteRoom(confirmDelete.id).unwrap();
+                  toast.success('Room deleted successfully');
+                  setConfirmDelete(null);
+                }}
                 className="px-4 py-2 rounded-xl bg-[#E74C3C] text-white text-[13px] font-bold hover:bg-[#c0392b]"
               >
                 Delete
@@ -128,22 +135,25 @@ function RoomFormDialog({ room, onClose }: { room: RoomSettingModel | null; onCl
   const [endTime, setEndTime] = useState(room?.endTime ?? '21:00');
   const [createRoom, { isLoading: c1 }] = useCreateSettingsRoomMutation();
   const [updateRoom, { isLoading: c2 }] = useUpdateSettingsRoomMutation();
+  const toast = useToast();
 
   const submitting = c1 || c2;
 
   const save = async () => {
     if (!name.trim()) return;
     if (room) {
-      await updateRoom({ id: room.id, name: name.trim(), color, startTime, endTime });
+      await updateRoom({ id: room.id, name: name.trim(), color, startTime, endTime }).unwrap();
+      toast.success('Room updated successfully');
     } else {
-      await createRoom({ name: name.trim(), color, startTime, endTime });
+      await createRoom({ name: name.trim(), color, startTime, endTime }).unwrap();
+      toast.success('Room created successfully');
     }
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+    <div className={MODAL_OVERLAY_CLASS}>
+      <div className={`rounded-2xl w-full max-w-md p-6 ${MODAL_PANEL_CLASS}`}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-[18px] font-extrabold text-[#1A2233]">
             {room ? 'Edit room' : 'New room'}

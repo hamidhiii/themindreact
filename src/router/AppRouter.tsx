@@ -5,6 +5,7 @@ import TeacherLayout from '../layouts/TeacherLayout';
 
 import AuthPage from '../pages/Auth/AuthPage';
 import DashboardPage from '../pages/Dashboard/DashboardPage';
+import AnalyticsDetailPage from '../pages/Analytics/AnalyticsDetailPage';
 import HomePage from '../pages/Home/HomePage';
 import StudentsPage from '../pages/Students/StudentsPage';
 import StudentDetailsPage from '../pages/Students/StudentDetailsPage';
@@ -12,6 +13,7 @@ import LeadsPage from '../pages/Leads/LeadsPage';
 import GroupsPage from '../pages/Groups/GroupsPage';
 import GroupDetailsPage from '../pages/Groups/GroupDetailsPage';
 import TeachersPage from '../pages/Teachers/TeachersPage';
+import TeacherDetailsPage from '../pages/Teachers/TeacherDetailsPage';
 import ExamsPage from '../pages/Exams/ExamsPage';
 import SalaryPage from '../pages/Salary/SalaryPage';
 import TariffPage from '../pages/Salary/TariffPage';
@@ -53,7 +55,7 @@ export default function AppRouter() {
             <Route element={<AdminLayout />}>
               <Route path="/home" element={<HomePage />} />
               <Route path="/the-mind" element={<DashboardPage />} />
-              <Route path="/analytics-debtors-detail" element={<DashboardPage />} />
+              <Route path="/analytics-debtors-detail" element={<AnalyticsDetailPage />} />
               <Route path="/room-schedule" element={<RoomSchedulePage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
 
@@ -69,7 +71,7 @@ export default function AppRouter() {
               <Route path="/exams" element={<ExamsPage />} />
               <Route path="/exams/details/:examId" element={<ExamsPage />} />
               <Route path="/teachers" element={<TeachersPage />} />
-              <Route path="/teachers/details/:teacherId" element={<TeachersPage />} />
+              <Route path="/teachers/details/:teacherId" element={<TeacherDetailsPage />} />
               <Route path="/tasks" element={<TasksPage />} />
               <Route path="/task-manager" element={<TasksPage />} />
 

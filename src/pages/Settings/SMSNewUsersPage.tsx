@@ -1,7 +1,21 @@
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, Send } from 'lucide-react';
+import { useState } from 'react';
 import UtilityPage from '../../components/UtilityPage/UtilityPage';
+import { useSendRemindersMutation } from '../../store/api/dashboardApi';
 
 export default function SMSNewUsersPage() {
+  const [sendReminders, { isLoading }] = useSendRemindersMutation();
+  const [message, setMessage] = useState('');
+
+  const handleSend = async () => {
+    try {
+      await sendReminders({ audience: 'new' }).unwrap();
+      setMessage('Messages sent');
+    } catch {
+      setMessage('Could not send messages');
+    }
+  };
+
   return (
     <UtilityPage
       title="SMS New Users"
@@ -13,9 +27,16 @@ export default function SMSNewUsersPage() {
         { label: 'Templates', value: 3, tone: '#2ECC8A' },
       ]}
     >
-      <p className="text-[13px] font-semibold text-[#8A9BB8]">
-        New-user SMS actions are grouped here, matching the Dart route.
-      </p>
+      <button
+        type="button"
+        onClick={handleSend}
+        disabled={isLoading}
+        className="flex items-center gap-2 rounded-xl bg-[#ED6A2E] px-4 py-3 text-[13px] font-black text-white shadow-[0_6px_18px_rgba(237,106,46,0.25)] disabled:opacity-50"
+      >
+        <Send size={16} />
+        {isLoading ? 'Sending...' : 'Send welcome message'}
+      </button>
+      {message && <p className="mt-3 text-[12px] font-bold text-[#8A9BB8]">{message}</p>}
     </UtilityPage>
   );
 }

@@ -1,5 +1,7 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import { axiosBaseQuery } from '../../api/axiosBaseQuery';
+import { ApiPaths } from '../../api/apiPaths';
+import { dataWithFallbacks, extractMapList } from '../../api/apiResponse';
 import type {
   SalaryDashboardModel,
   SalaryReportModel,
@@ -128,34 +130,36 @@ export const salaryApi = createApi({
   tagTypes: ['Salary', 'Tariff', 'StaffSalary'],
   endpoints: (builder) => ({
     getSalaryDashboard: builder.query<SalaryDashboardModel, void>({
-      query: () => ({ url: '/teacher/salary/dashboard/' }),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.salarySummary },
+            { url: '/teacher/salary/dashboard/' },
+          ],
+          (raw) => parseSalaryDashboard(raw as Record<string, unknown>)
+        ),
       providesTags: ['Salary'],
-      transformResponse: (raw) => parseSalaryDashboard(raw as Record<string, unknown>),
     }),
     getSalaryReport: builder.query<SalaryReportModel[], void>({
-      query: () => ({ url: '/salary/report/' }),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.salaryHistory },
+            { url: '/salary/report/' },
+          ],
+          (raw) => extractMapList(raw).map(parseSalaryReport)
+        ),
       providesTags: ['Salary'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseSalaryReport);
-      },
     }),
     getTariffs: builder.query<TariffModel[], void>({
-      query: () => ({ url: '/salary/tariffs/' }),
+      query: () => ({ url: ApiPaths.salaryTariffs }),
       providesTags: ['Tariff'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseTariff);
-      },
+      transformResponse: (raw) => extractMapList(raw).map(parseTariff),
     }),
     getTariffById: builder.query<TariffModel, number>({
-      query: (id) => ({ url: `/salary/tariffs/${id}/` }),
+      query: (id) => ({ url: ApiPaths.salaryTariff(id) }),
       providesTags: ['Tariff'],
       transformResponse: (raw) => parseTariff(raw as Record<string, unknown>),
     }),
@@ -169,7 +173,7 @@ export const salaryApi = createApi({
       isPopular: boolean;
     }>({
       query: (data) => ({
-        url: '/salary/tariffs/',
+        url: ApiPaths.salaryTariffs,
         method: 'POST',
         data: tariffToBody(data),
       }),
@@ -186,36 +190,35 @@ export const salaryApi = createApi({
       isPopular: boolean;
     }>({
       query: (data) => ({
-        url: `/salary/tariffs/${data.id}/`,
-        method: 'PUT',
+        url: ApiPaths.salaryTariff(data.id),
+        method: 'PATCH',
         data: tariffToBody(data),
       }),
       invalidatesTags: ['Tariff'],
     }),
     deleteTariff: builder.mutation<void, number>({
-      query: (id) => ({ url: `/salary/tariffs/${id}/`, method: 'DELETE' }),
+      query: (id) => ({ url: ApiPaths.salaryTariff(id), method: 'DELETE' }),
       invalidatesTags: ['Tariff'],
     }),
     patchTariff: builder.mutation<void, { id: number; data: Partial<TariffModel> }>({
-      query: ({ id, data }) => ({ url: `/salary/tariffs/${id}/`, method: 'PATCH', data }),
+      query: ({ id, data }) => ({ url: ApiPaths.salaryTariff(id), method: 'PATCH', data }),
       invalidatesTags: ['Tariff'],
     }),
     getStaffSalaries: builder.query<StaffSalaryModel[], void>({
-      query: () => ({ url: '/teacher/salary/teachers/' }),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.salaryEmployees },
+            { url: '/teacher/salary/teachers/' },
+          ],
+          (raw) => extractMapList(raw).map(parseStaffSalary)
+        ),
       providesTags: ['StaffSalary'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[]
-            ?? (data as Record<string, unknown>)?.['teachers'] as Record<string, unknown>[]
-            ?? []);
-        return list.map(parseStaffSalary);
-      },
     }),
     createStaffSalary: builder.mutation<StaffSalaryModel, Partial<StaffSalaryModel> & { userId: string }>({
       query: (data) => ({
-        url: '/teacher/salary/teachers/',
+        url: ApiPaths.salaryEmployees,
         method: 'POST',
         data: {
           user: data.userId,
@@ -231,7 +234,7 @@ export const salaryApi = createApi({
     }),
     patchStaffSalary: builder.mutation<StaffSalaryModel, { id: number; data: Record<string, unknown> }>({
       query: ({ id, data }) => ({
-        url: `/teacher/salary/teachers/${id}/`,
+        url: ApiPaths.salaryEmployee(id),
         method: 'PATCH',
         data,
       }),
@@ -239,15 +242,27 @@ export const salaryApi = createApi({
       transformResponse: (raw) => parseStaffSalary(raw as Record<string, unknown>),
     }),
     payTeacherSalary: builder.mutation<void, { teacherId: string; amount: number; month: string; note?: string }>({
-      query: ({ teacherId, amount, month, note }) => ({
-        url: `/teacher/salary/teachers/${teacherId}/pay/`,
-        method: 'POST',
-        data: { amount: Math.round(amount), month, ...(note ? { note } : {}) },
-      }),
+      queryFn: ({ teacherId, amount, month, note }, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            {
+              url: ApiPaths.salaryEmployeeStatus(teacherId),
+              method: 'POST',
+              data: { amount: Math.round(amount), month, ...(note ? { note } : {}) },
+            },
+            {
+              url: `/teacher/salary/teachers/${teacherId}/pay/`,
+              method: 'POST',
+              data: { amount: Math.round(amount), month, ...(note ? { note } : {}) },
+            },
+          ],
+          () => undefined
+        ),
       invalidatesTags: ['StaffSalary', 'Salary'],
     }),
     getSalaryFinanceAnalytics: builder.query<FinanceAnalyticsModel, void>({
-      query: () => ({ url: '/salary/finance-analytics/' }),
+      query: () => ({ url: ApiPaths.salaryIncomeDynamics }),
       transformResponse: (raw) => parseFinanceAnalytics(raw as Record<string, unknown>),
     }),
   }),

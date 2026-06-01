@@ -1,5 +1,8 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import { axiosBaseQuery } from '../../api/axiosBaseQuery';
+import { ApiPaths } from '../../api/apiPaths';
+import { buildPaymentPayload } from '../../api/paymentPayload';
+import { dataWithFallbacks, extractMapList } from '../../api/apiResponse';
 import type { TransactionModel } from '../../types';
 
 function parseTransaction(j: Record<string, unknown>): TransactionModel {
@@ -27,22 +30,42 @@ export const transactionApi = createApi({
       startDate?: string;
       endDate?: string;
     } | void>({
-      query: (params = {}) => ({
-        url: '/student/transactions/',
-        params: params ?? {},
-      }),
+      queryFn: (params = {}, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.transactions, params: params ?? {} },
+            { url: '/student/transactions/', params: params ?? {} },
+          ],
+          (raw) => extractMapList(raw).map(parseTransaction)
+        ),
       providesTags: ['Transaction'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseTransaction);
-      },
+    }),
+    createPayment: builder.mutation<void, {
+      studentId: string | number;
+      amount: string;
+      payWith: string;
+      groupId?: string | number;
+      date?: string;
+    }>({
+      queryFn: (data, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            {
+              url: ApiPaths.transactionsPayment,
+              method: 'POST',
+              data: buildPaymentPayload(data),
+            },
+          ],
+          () => undefined
+        ),
+      invalidatesTags: ['Transaction'],
     }),
   }),
 });
 
 export const {
   useGetTransactionsQuery,
+  useCreatePaymentMutation,
 } = transactionApi;

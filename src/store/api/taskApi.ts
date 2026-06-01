@@ -1,5 +1,7 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import { axiosBaseQuery } from '../../api/axiosBaseQuery';
+import { ApiPaths } from '../../api/apiPaths';
+import { extractMapList } from '../../api/apiResponse';
 import type { TaskApiModel, TaskNotificationModel } from '../../types';
 
 function parseTaskNotification(j: Record<string, unknown>): TaskNotificationModel {
@@ -43,17 +45,11 @@ export const taskApi = createApi({
     }),
     getTasks: builder.query<TaskApiModel[], { status?: string; assignedTo?: string } | void>({
       query: (params = {}) => ({
-        url: '/task/',
+        url: ApiPaths.task,
         params: params ?? {},
       }),
       providesTags: ['Task'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseTask);
-      },
+      transformResponse: (raw) => extractMapList(raw).map(parseTask),
     }),
     getMyTasks: builder.query<TaskApiModel[], { status?: string } | void>({
       query: (params = {}) => ({
@@ -61,13 +57,7 @@ export const taskApi = createApi({
         params: params ?? {},
       }),
       providesTags: ['Task'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseTask);
-      },
+      transformResponse: (raw) => extractMapList(raw).map(parseTask),
     }),
     createTask: builder.mutation<TaskApiModel, {
       title: string;
@@ -89,8 +79,11 @@ export const taskApi = createApi({
         };
         if (data.tag) body['tag'] = data.tag;
         if (data.deadline) body['due_date'] = data.deadline;
-        if (data.assignedTo) body['assigned_to'] = data.assignedTo;
-        return { url: '/task/create/', method: 'POST', data: body };
+        if (data.assignedTo) {
+          const assignee = Number(data.assignedTo);
+          body['assigned_to'] = Number.isNaN(assignee) ? data.assignedTo : assignee;
+        }
+        return { url: ApiPaths.task, method: 'POST', data: body };
       },
       invalidatesTags: ['Task'],
       transformResponse: (raw) => parseTask(raw as Record<string, unknown>),
@@ -116,27 +109,24 @@ export const taskApi = createApi({
         if (rest.deadline !== undefined) body['due_date'] = rest.deadline;
         if (rest.isCompleted !== undefined) body['is_completed'] = rest.isCompleted;
         if (rest.assignedTo !== undefined) body['assigned_to'] = rest.assignedTo;
-        return { url: `/task/${id}/`, method: 'PATCH', data: body };
+        return { url: ApiPaths.taskById(id), method: 'PATCH', data: body };
       },
       invalidatesTags: ['Task'],
       transformResponse: (raw) => parseTask(raw as Record<string, unknown>),
     }),
     deleteTask: builder.mutation<void, string>({
-      query: (id) => ({ url: `/task/${id}/`, method: 'DELETE' }),
+      query: (id) => ({ url: ApiPaths.taskById(id), method: 'DELETE' }),
       invalidatesTags: ['Task'],
     }),
     updateTaskStatus: builder.mutation<void, { id: string; status: string }>({
-      query: ({ id, status }) => ({ url: `/task/${id}/status/`, method: 'PATCH', data: { status } }),
+      query: ({ id, status }) => ({ url: ApiPaths.taskStatusById(id), method: 'PATCH', data: { status } }),
       invalidatesTags: ['Task'],
     }),
 
     getNotifications: builder.query<TaskNotificationModel[], void>({
-      query: () => ({ url: '/task/notifications/' }),
+      query: () => ({ url: ApiPaths.taskNotifications }),
       providesTags: ['TaskNotification'],
-      transformResponse: (raw) => {
-        if (!Array.isArray(raw)) return [];
-        return (raw as Record<string, unknown>[]).map(parseTaskNotification);
-      },
+      transformResponse: (raw) => extractMapList(raw).map(parseTaskNotification),
     }),
     getUnreadNotificationCount: builder.query<number, void>({
       query: () => ({ url: '/task/notifications/unread-count/' }),
@@ -153,11 +143,11 @@ export const taskApi = createApi({
       },
     }),
     readAllNotifications: builder.mutation<void, void>({
-      query: () => ({ url: '/task/notifications/read-all/', method: 'PATCH' }),
+      query: () => ({ url: ApiPaths.taskNotificationsMarkAllRead, method: 'POST' }),
       invalidatesTags: ['TaskNotification'],
     }),
     readNotification: builder.mutation<void, string>({
-      query: (id) => ({ url: `/task/notifications/${id}/read/`, method: 'POST', data: {} }),
+      query: (id) => ({ url: ApiPaths.taskNotification(id), method: 'PATCH', data: { is_read: true } }),
       invalidatesTags: ['TaskNotification'],
     }),
   }),

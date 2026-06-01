@@ -1,5 +1,7 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import { axiosBaseQuery } from '../../api/axiosBaseQuery';
+import { ApiPaths } from '../../api/apiPaths';
+import { dataWithFallbacks, extractMapList, unwrapEntity } from '../../api/apiResponse';
 import type {
   StudentModel,
   PaymentModel,
@@ -150,7 +152,10 @@ function studentToBody(data: {
   if (data.district !== undefined) body['district'] = data.district;
   if (data.source !== undefined) body['source'] = data.source;
   if (data.notes !== undefined) body['notes'] = data.notes;
-  if (data.groupId !== undefined) body['group'] = data.groupId;
+  if (data.groupId !== undefined && data.groupId !== '') {
+    const groupId = Number(data.groupId);
+    body['group'] = Number.isNaN(groupId) ? data.groupId : groupId;
+  }
   if (data.balance !== undefined) body['balance'] = data.balance;
   return body;
 }
@@ -161,47 +166,87 @@ export const studentApi = createApi({
   tagTypes: ['Student', 'Payment', 'Journal', 'StudentUi'],
   endpoints: (builder) => ({
     getStudents: builder.query<StudentModel[], { name?: string; phone?: string; status?: string; group?: number } | void>({
-      query: (params = {}) => ({
-        url: '/student/ui/students/',
-        params: params ?? {},
-      }),
+      queryFn: (params = {}, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.students, params: params ?? {} },
+            { url: '/student/ui/students/', params: params ?? {} },
+          ],
+          (raw) => extractMapList(raw).map(parseStudent)
+        ),
       providesTags: ['Student'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseStudent);
-      },
     }),
     getStudentById: builder.query<StudentModel, string | number>({
-      query: (id) => ({ url: `/student/ui/${id}/profile/` }),
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.student(id) },
+            { url: `/student/ui/${id}/profile/` },
+          ],
+          (raw) => parseStudent(raw as Record<string, unknown>)
+        ),
       providesTags: ['Student'],
-      transformResponse: (raw) => parseStudent(raw as Record<string, unknown>),
     }),
     getStudentFinance: builder.query<Record<string, unknown>, string | number>({
-      query: (id) => ({ url: `/student/ui/${id}/finance/` }),
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.studentTransactions(id) },
+            { url: `/student/ui/${id}/finance/` },
+          ],
+          (raw) => Array.isArray(raw) ? { transactions: raw } : raw as Record<string, unknown>
+        ),
       providesTags: ['StudentUi'],
     }),
     getStudentGrades: builder.query<Record<string, unknown>, string | number>({
-      query: (id) => ({ url: `/student/ui/${id}/grades/` }),
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.studentAcademic(id) },
+            { url: `/student/ui/${id}/grades/` },
+          ],
+          (raw) => raw as Record<string, unknown>
+        ),
       providesTags: ['StudentUi'],
     }),
     getStudentActivity: builder.query<Record<string, unknown>[], string | number>({
-      query: (id) => ({ url: `/student/ui/${id}/activity/` }),
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.studentActivity(id) },
+            { url: ApiPaths.studentCalendar(id) },
+            { url: `/student/ui/${id}/activity/` },
+          ],
+          (raw) => extractMapList(raw)
+        ),
       providesTags: ['StudentUi'],
-      transformResponse: (raw) => {
-        if (Array.isArray(raw)) return raw as Record<string, unknown>[];
-        return ((raw as Record<string, unknown>)?.['results'] as Record<string, unknown>[]) ?? [];
-      },
     }),
     getStudentHistory: builder.query<StudentHistoryModel, string | number>({
-      query: (id) => ({ url: `/student/students/${id}/history/` }),
-      transformResponse: (raw) => parseStudentHistory(raw as Record<string, unknown>),
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.studentAcademic(id) },
+            { url: `/student/students/${id}/history/` },
+          ],
+          (raw) => parseStudentHistory(raw as Record<string, unknown>)
+        ),
     }),
     getStudentDashboard: builder.query<DashboardModel, void>({
-      query: () => ({ url: '/student/ui/dashboard/' }),
-      transformResponse: (raw) => parseDashboard(raw as Record<string, unknown>),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.studentsStats },
+            { url: '/student/ui/dashboard/' },
+          ],
+          (raw) => parseDashboard(raw as Record<string, unknown>)
+        ),
     }),
     getStudentFilters: builder.query<Record<string, unknown>, void>({
       query: () => ({ url: '/student/ui/filters/' }),
@@ -222,15 +267,18 @@ export const studentApi = createApi({
       district?: number;
       source?: string;
       notes?: string;
+      groupId?: string;
       balance?: string;
     }>({
-      query: (data) => ({
-        url: '/dashboard/students/create/',
-        method: 'POST',
-        data: studentToBody(data),
-      }),
+      queryFn: (data, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.students, method: 'POST', data: studentToBody(data) },
+          ],
+          (raw) => parseStudent(unwrapEntity(raw, ['student', 'item', 'result']))
+        ),
       invalidatesTags: ['Student'],
-      transformResponse: (raw) => parseStudent(raw as Record<string, unknown>),
     }),
     updateStudent: builder.mutation<StudentModel, {
       id: string | number;
@@ -246,38 +294,54 @@ export const studentApi = createApi({
       notes?: string;
       balance?: string;
     }>({
-      query: ({ id, ...rest }) => ({
-        url: `/student/students/${id}/`,
-        method: 'PATCH',
-        data: studentToBody(rest),
-      }),
+      queryFn: ({ id, ...rest }, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.student(id), method: 'PATCH', data: studentToBody(rest) },
+            { url: `/student/students/${id}/`, method: 'PATCH', data: studentToBody(rest) },
+          ],
+          (raw) => parseStudent(raw as Record<string, unknown>)
+        ),
       invalidatesTags: ['Student'],
-      transformResponse: (raw) => parseStudent(raw as Record<string, unknown>),
     }),
     deleteStudent: builder.mutation<void, string | number>({
-      query: (id) => ({ url: `/student/students/${id}/`, method: 'DELETE' }),
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.student(id), method: 'DELETE' },
+            { url: `/student/students/${id}/`, method: 'DELETE' },
+          ],
+          () => undefined
+        ),
       invalidatesTags: ['Student'],
     }),
     getStudentPayments: builder.query<PaymentModel[], string | number>({
-      query: (studentId) => ({
-        url: '/student/payments/',
-        params: { student: studentId },
-      }),
+      queryFn: (studentId, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.studentTransactions(studentId) },
+            { url: '/student/payments/', params: { student: studentId } },
+          ],
+          (raw) => extractMapList(raw).map(parsePayment)
+        ),
       providesTags: ['Payment'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parsePayment);
-      },
     }),
     assignGroupToStudent: builder.mutation<void, { studentId: number; groupId: number }>({
-      query: ({ studentId, groupId }) => ({
-        url: '/group/student-groups/',
-        method: 'POST',
-        data: { student: studentId, group: groupId },
-      }),
+      queryFn: ({ studentId, groupId }, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            {
+              url: ApiPaths.groupStudents(groupId),
+              method: 'POST',
+              data: { student_id: studentId },
+            },
+          ],
+          () => undefined
+        ),
       invalidatesTags: ['Student'],
     }),
     getJournal: builder.query<JournalModel, { groupId: number; lessonDate?: string; teacherId?: string }>({

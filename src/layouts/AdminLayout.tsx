@@ -1,9 +1,8 @@
-import { useMemo, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useSelector } from 'react-redux';
-import { Bell } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar, { SidebarToggle } from '../components/Sidebar/Sidebar';
-import type { RootState } from '../store/store';
+import TopActions from '../components/common/TopActions';
+import { ensureDefaultBranch } from '../utils/branchContext';
 
 const titles: Array<[string, string]> = [
   ['/workers/details', 'Employee Profile'],
@@ -39,7 +38,7 @@ const titles: Array<[string, string]> = [
   ['/settings', 'Settings'],
   ['/news', 'News'],
   ['/feedback', 'Feedback'],
-  ['/the-mind', 'Overview'],
+  ['/the-mind', 'Analytics'],
   ['/room-schedule', 'Room Schedule'],
   ['/analytics-debtors-detail', 'Analytics'],
   ['/home', 'Dashboard Overview'],
@@ -52,42 +51,58 @@ function pageTitle(pathname: string) {
 
 export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { role, username } = useSelector((s: RootState) => s.auth);
-  const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    ensureDefaultBranch();
+  }, []);
   const title = useMemo(() => pageTitle(location.pathname), [location.pathname]);
-  const initial = (username?.[0] ?? role?.[0] ?? 'A').toUpperCase();
+  const isHomePage = location.pathname.startsWith('/home');
+  const hideHeaderTitle =
+    isHomePage ||
+    location.pathname.startsWith('/active-leads') ||
+    location.pathname.startsWith('/analytics-debtors-detail');
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg-app">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="flex min-w-0 flex-1 flex-col lg:ml-20 min-[1100px]:ml-[260px]">
+        {/* Mobile header */}
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-black/10 bg-bg-app px-3 lg:hidden">
           <SidebarToggle onClick={() => setSidebarOpen(true)} />
-          <h1 className="min-w-0 flex-1 truncate text-[20px] font-extrabold text-[#1A2233]">
-            {title}
-          </h1>
-          <button
-            type="button"
-            className="relative rounded-xl p-2 transition-colors hover:bg-white"
-            onClick={() => navigate('/notifications')}
-            aria-label="Notifications"
-          >
-            <Bell size={19} className="text-[#8A9BB8]" />
-            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#ED6A2E] ring-2 ring-bg-app" />
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/settings')}
-            className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-gradient-to-br from-[#ED6A2E] to-[#FF9A6C] text-sm font-extrabold uppercase text-white shadow-[0_3px_8px_rgba(237,106,46,0.3)]"
-            aria-label="Profile"
-          >
-            {initial}
-          </button>
+          {isHomePage ? (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[14px] font-extrabold text-[#1A2233]">Overview</p>
+            </div>
+          ) : (
+            <h1 className="min-w-0 flex-1 truncate text-[16px] font-extrabold text-[#1A2233]">
+              {title}
+            </h1>
+          )}
+          <TopActions compact showSearch={isHomePage} showAdd />
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 sm:p-5 lg:p-6 xl:p-8">
+        {/* Desktop header */}
+        <header className="hidden min-h-[72px] shrink-0 items-center gap-4 border-b border-[#F0F1F5] bg-white px-6 py-3 lg:flex">
+          {isHomePage ? (
+            <div className="shrink-0 min-w-[220px]">
+              <h1 className="text-[22px] font-extrabold text-[#1A2233] tracking-tight leading-tight">
+                Overview of indicators
+              </h1>
+              <p className="text-[11px] text-[#8A9BB8] font-semibold mt-0.5">
+                Trial lessons today · New active students this month
+              </p>
+            </div>
+          ) : !hideHeaderTitle ? (
+            <h1 className="shrink-0 truncate text-[16px] font-extrabold text-[#1A2233] min-w-[180px]">
+              {title}
+            </h1>
+          ) : null}
+          <TopActions showSearch={isHomePage} showAdd className="flex-1" />
+        </header>
+
+        <main className="flex-1 overflow-y-auto p-4 sm:p-5 lg:p-5 xl:p-6">
           <Outlet />
         </main>
       </div>

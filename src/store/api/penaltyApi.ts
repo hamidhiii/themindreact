@@ -1,5 +1,7 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import { axiosBaseQuery } from '../../api/axiosBaseQuery';
+import { ApiPaths } from '../../api/apiPaths';
+import { dataWithFallbacks, extractMapList } from '../../api/apiResponse';
 import type {
   PenaltyTypeModel,
   PenaltyModel,
@@ -94,24 +96,25 @@ export const penaltyApi = createApi({
   tagTypes: ['PenaltyType', 'Penalty', 'PenaltyHistory'],
   endpoints: (builder) => ({
     getPenaltyTypes: builder.query<PenaltyTypeModel[], void>({
-      query: () => ({ url: '/penalty/penalty-types/' }),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.penaltyTypes },
+            { url: '/penalty/penalty-types/' },
+          ],
+          (raw) => extractMapList(raw).map(parsePenaltyType)
+        ),
       providesTags: ['PenaltyType'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parsePenaltyType);
-      },
     }),
     getPenaltyTypeById: builder.query<PenaltyTypeModel, string>({
-      query: (id) => ({ url: `/penalty/penalty-types/${id}/` }),
+      query: (id) => ({ url: ApiPaths.penaltyType(id) }),
       providesTags: ['PenaltyType'],
       transformResponse: (raw) => parsePenaltyType(raw as Record<string, unknown>),
     }),
     createPenaltyType: builder.mutation<PenaltyTypeModel, { name: string; defaultAmount: string; isActive?: boolean }>({
       query: (data) => ({
-        url: '/penalty/penalty-types/',
+        url: ApiPaths.penaltyTypes,
         method: 'POST',
         data: { name: data.name, default_amount: data.defaultAmount, is_active: data.isActive ?? true },
       }),
@@ -120,15 +123,15 @@ export const penaltyApi = createApi({
     }),
     updatePenaltyType: builder.mutation<PenaltyTypeModel, { id: string; name: string; defaultAmount: string; isActive?: boolean }>({
       query: (data) => ({
-        url: `/penalty/penalty-types/${data.id}/`,
-        method: 'PUT',
+        url: ApiPaths.penaltyType(data.id),
+        method: 'PATCH',
         data: { name: data.name, default_amount: data.defaultAmount, is_active: data.isActive ?? true },
       }),
       invalidatesTags: ['PenaltyType'],
       transformResponse: (raw) => parsePenaltyType(raw as Record<string, unknown>),
     }),
     deletePenaltyType: builder.mutation<void, string>({
-      query: (id) => ({ url: `/penalty/penalty-types/${id}/`, method: 'DELETE' }),
+      query: (id) => ({ url: ApiPaths.penaltyType(id), method: 'DELETE' }),
       invalidatesTags: ['PenaltyType'],
     }),
 
@@ -138,7 +141,7 @@ export const penaltyApi = createApi({
         const query: Record<string, string> = {};
         if (p?.month) query['month'] = p.month;
         if (p?.teacher) query['teacher'] = p.teacher;
-        return { url: '/penalty/penalties/', params: query };
+        return { url: ApiPaths.penaltyCalendar, params: query };
       },
       providesTags: ['Penalty'],
       transformResponse: (raw) => {
@@ -157,10 +160,10 @@ export const penaltyApi = createApi({
       note?: string;
     }>({
       query: (data) => ({
-        url: '/penalty/penalties/',
+        url: ApiPaths.penalty,
         method: 'POST',
         data: {
-          teacher: data.teacher,
+          user_ids: [data.teacher],
           penalty_type: data.penaltyType,
           amount: data.amount,
           penalty_date: data.penaltyDate,
@@ -179,7 +182,7 @@ export const penaltyApi = createApi({
       note?: string;
     }>({
       query: ({ id, penaltyType, penaltyDate, ...rest }) => ({
-        url: `/penalty/penalties/${id}/`,
+        url: ApiPaths.penaltyId(id),
         method: 'PATCH',
         data: {
           ...rest,
@@ -191,7 +194,7 @@ export const penaltyApi = createApi({
       transformResponse: (raw) => parsePenalty(raw as Record<string, unknown>),
     }),
     deletePenalty: builder.mutation<void, string>({
-      query: (id) => ({ url: `/penalty/penalties/${id}/`, method: 'DELETE' }),
+      query: (id) => ({ url: ApiPaths.penaltyId(id), method: 'DELETE' }),
       invalidatesTags: ['Penalty', 'PenaltyHistory'],
     }),
     bulkCreatePenalty: builder.mutation<void, {
@@ -202,14 +205,14 @@ export const penaltyApi = createApi({
       teacherIds: string[];
     }>({
       query: (data) => ({
-        url: '/penalty/bulk-create/',
+        url: ApiPaths.penalty,
         method: 'POST',
         data: {
           penalty_type: data.penaltyType,
           penalty_date: data.penaltyDate,
           amount: data.amount,
           note: data.note,
-          teacher_ids: data.teacherIds,
+          user_ids: data.teacherIds,
         },
       }),
       invalidatesTags: ['Penalty', 'PenaltyHistory'],
@@ -222,20 +225,16 @@ export const penaltyApi = createApi({
         if (p?.month) query['month'] = p.month;
         if (p?.teacher) query['teacher'] = p.teacher;
         if (p?.penaltyType) query['penalty_type'] = p.penaltyType;
-        return { url: '/penalty/history/', params: query };
+        return { url: ApiPaths.penaltyCalendar, params: query };
       },
       providesTags: ['PenaltyHistory'],
       transformResponse: (raw) => parsePenaltyHistory(raw),
     }),
 
     getPenaltyTeacherChoices: builder.query<PenaltyTeacherChoice[], void>({
-      query: () => ({ url: '/penalty/teacher-choices/' }),
+      query: () => ({ url: ApiPaths.workerChoices }),
       transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parsePenaltyTeacherChoice);
+        return extractMapList(raw).map(parsePenaltyTeacherChoice);
       },
     }),
   }),

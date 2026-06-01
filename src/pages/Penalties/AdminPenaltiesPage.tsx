@@ -13,6 +13,8 @@ import {
   useCreatePenaltyMutation,
   useBulkCreatePenaltyMutation,
 } from '../../store/api/penaltyApi';
+import { MODAL_OVERLAY_CLASS, MODAL_PANEL_CLASS } from '../../components/common/modalStyles';
+import CustomSelect from '../../components/common/CustomSelect';
 import type { PenaltyTypeModel } from '../../types';
 
 const MONTHS_RU = [
@@ -197,8 +199,8 @@ function PenaltyTypesDialog({ types, onClose }: { types: PenaltyTypeModel[]; onC
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl">
+    <div className={MODAL_OVERLAY_CLASS}>
+      <div className={`rounded-2xl w-full max-w-lg p-6 ${MODAL_PANEL_CLASS}`}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-[18px] font-extrabold text-[#1A2233]">Penalty types</h2>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-50"><X size={18} /></button>
@@ -313,8 +315,8 @@ function AddPenaltyDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+    <div className={MODAL_OVERLAY_CLASS}>
+      <div className={`rounded-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto ${MODAL_PANEL_CLASS}`}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-[18px] font-extrabold text-[#1A2233]">New penalty</h2>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-50"><X size={18} /></button>
@@ -323,16 +325,12 @@ function AddPenaltyDialog({
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
             <label className="text-[11px] font-bold text-[#8A9BB8] mb-1 block uppercase tracking-wider">Penalty type</label>
-            <select
+            <CustomSelect
               value={typeId}
-              onChange={(e) => onTypeSelected(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-[#F0F1F5] text-[13px] focus:border-[#ED6A2E] outline-none bg-white"
-            >
-              <option value="">Choose type</option>
-              {types.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
+              onChange={onTypeSelected}
+              placeholder="Choose type"
+              options={types.map((t) => ({ value: t.id, label: t.name }))}
+            />
           </div>
           <div>
             <label className="text-[11px] font-bold text-[#8A9BB8] mb-1 block uppercase tracking-wider">Date</label>

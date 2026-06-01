@@ -10,6 +10,7 @@ export default function TransactionsPage() {
     const { data: transactions = [], isLoading } = useGetTransactionsQuery();
     const [search, setSearch] = useState('');
     const [date, setDate] = useState(''); // Default empty for live data
+    const [appliedDate, setAppliedDate] = useState('');
 
     // Real-time calculations from API data
     const stats = useMemo(() => {
@@ -33,10 +34,22 @@ export default function TransactionsPage() {
         }, { total: 0, today: 0, thisMonth: 0, cash: 0, card: 0, transfer: 0 });
     }, [transactions]);
 
-    const filtered = transactions.filter(t =>
-        (t.studentName || '').toLowerCase().includes(search.toLowerCase()) ||
-        (t.payWithDisplay || '').toLowerCase().includes(search.toLowerCase())
-    );
+    const normalizeDate = (value: string) => {
+        if (!value.trim()) return '';
+        const parts = value.trim().split('.');
+        if (parts.length === 3) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        return value.trim();
+    };
+
+    const filtered = transactions.filter(t => {
+        const matchesSearch =
+            (t.studentName || '').toLowerCase().includes(search.toLowerCase()) ||
+            (t.groupName || '').toLowerCase().includes(search.toLowerCase()) ||
+            (t.payWithDisplay || '').toLowerCase().includes(search.toLowerCase());
+        const normalizedDate = normalizeDate(appliedDate);
+        const matchesDate = !normalizedDate || (t.createdAt || '').startsWith(normalizedDate);
+        return matchesSearch && matchesDate;
+    });
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -146,7 +159,11 @@ export default function TransactionsPage() {
                             />
                         </div>
                     </div>
-                    <button className="w-full lg:w-auto mt-auto lg:mt-6 bg-[#ED6A2E] text-white px-8 py-3 rounded-xl text-[13px] font-black flex items-center justify-center gap-2 hover:bg-[#D95B24] transition-all">
+                    <button
+                        type="button"
+                        onClick={() => setAppliedDate(date)}
+                        className="w-full lg:w-auto mt-auto lg:mt-6 bg-[#ED6A2E] text-white px-8 py-3 rounded-xl text-[13px] font-black flex items-center justify-center gap-2 hover:bg-[#D95B24] transition-all"
+                    >
                         <Filter size={18} strokeWidth={3} />
                         Apply
                     </button>
@@ -211,7 +228,7 @@ export default function TransactionsPage() {
                         <button className="p-2 rounded-lg border border-[#F0F1F5] text-[#8A9BB8] hover:bg-gray-50 transition-all disabled:opacity-50" disabled>
                             <ChevronLeft size={18} />
                         </button>
-                        <button className="w-9 h-9 rounded-lg bg-[#ED6A2E] text-white text-[12px] font-black">1</button>
+                        <button className="w-9 h-9 rounded-lg bg-[#ED6A2E] text-white text-[12px] font-black" disabled aria-current="page">1</button>
                         <button className="p-2 rounded-lg border border-[#F0F1F5] text-[#8A9BB8] hover:bg-gray-50 transition-all disabled:opacity-50" disabled>
                             <ChevronRight size={18} />
                         </button>

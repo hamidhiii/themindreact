@@ -27,7 +27,7 @@ export function getUserIdFromToken(token: string | null): string | null {
 
 export function getRoleFromToken(token: string | null): string | null {
   const p = jwtPayload(token);
-  const v = p['role'];
+  const v = p['role'] ?? p['user_role'] ?? p['system_role'];
   return v != null ? String(v) : null;
 }
 

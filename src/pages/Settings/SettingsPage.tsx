@@ -1,9 +1,11 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Plus, ShoppingCart, Car, Coffee,
     Home, MoreVertical
 } from 'lucide-react';
-import { useGetExpensesQuery } from '../../store/api/settingsApi';
+import { useCreateExpenseMutation, useDeleteExpenseMutation, useGetExpensesQuery } from '../../store/api/settingsApi';
+import CustomSelect from '../../components/common/CustomSelect';
 
 const tabs = [
     'Expenses', 'Marketing', 'Marketing Leads',
@@ -17,14 +19,61 @@ const categories = [
     { name: 'Housing', color: '#F15F5F', icon: Home },
 ];
 
+const tabRoutes: Record<string, string> = {
+    Marketing: '/marketing-analytics',
+    'Marketing Leads': '/marketing-leads',
+    News: '/news',
+    Feedback: '/feedback',
+    SMS: '/sms-active-users',
+    'Create Role': '/create-role',
+    'Create Branch': '/branch-manager',
+};
+
 export default function SettingsPage() {
+    const navigate = useNavigate();
     const { data: expenses = [], isLoading } = useGetExpensesQuery();
+    const [createExpense, { isLoading: isCreatingExpense }] = useCreateExpenseMutation();
+    const [deleteExpense] = useDeleteExpenseMutation();
     const [activeTab, setActiveTab] = useState('Expenses');
     const [period, setPeriod] = useState('All');
+    const [expenseForm, setExpenseForm] = useState({
+        name: '',
+        category: categories[0].name,
+        amount: '',
+        date: new Date().toISOString().split('T')[0],
+    });
 
     const totalExpense = useMemo(() => {
         return expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
     }, [expenses]);
+
+    const handleTabClick = (tab: string) => {
+        const route = tabRoutes[tab];
+        if (route) {
+            navigate(route);
+            return;
+        }
+        setActiveTab(tab);
+    };
+
+    const handleCreateExpense = async (event: React.FormEvent) => {
+        event.preventDefault();
+        const amount = Number(expenseForm.amount);
+        if (!expenseForm.name.trim() || !Number.isFinite(amount) || amount <= 0) return;
+
+        await createExpense({
+            name: expenseForm.name.trim(),
+            category: expenseForm.category,
+            amount,
+            date: expenseForm.date || undefined,
+        }).unwrap();
+        setExpenseForm({
+            name: '',
+            category: categories[0].name,
+            amount: '',
+            date: new Date().toISOString().split('T')[0],
+        });
+    };
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -39,7 +88,7 @@ export default function SettingsPage() {
                 {tabs.map(tab => (
                     <button
                         key={tab}
-                        onClick={() => setActiveTab(tab)}
+                        onClick={() => handleTabClick(tab)}
                         className={`pb-4 text-[13px] font-black transition-all relative whitespace-nowrap ${activeTab === tab ? 'text-[#ED6A2E]' : 'text-[#8A9BB8] hover:text-[#5A6376]'
                             }`}
                     >
@@ -75,11 +124,13 @@ export default function SettingsPage() {
                                 <h3 className="text-[16px] font-black text-[#1A2233]">New Expense</h3>
                             </div>
 
-                            <div className="space-y-4">
+                            <form onSubmit={handleCreateExpense} className="space-y-4">
                                 <div className="space-y-1.5">
                                     <label className="text-[11px] font-black text-[#1A2233] uppercase ml-1">Name</label>
                                     <input
                                         type="text"
+                                        value={expenseForm.name}
+                                        onChange={(e) => setExpenseForm((prev) => ({ ...prev, name: e.target.value }))}
                                         placeholder="E.g., Office Supplies"
                                         className="w-full bg-[#F7F8FA] border border-[#F0F1F5] rounded-xl px-4 py-3 text-[12px] font-bold text-[#1A2233] outline-none"
                                     />
@@ -88,14 +139,19 @@ export default function SettingsPage() {
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-1.5">
                                         <label className="text-[11px] font-black text-[#1A2233] uppercase ml-1">Category</label>
-                                        <select className="w-full bg-[#F7F8FA] border border-[#F0F1F5] rounded-xl px-4 py-3 text-[12px] font-bold text-[#1A2233] outline-none appearance-none">
-                                            {categories.map(c => <option key={c.name}>{c.name}</option>)}
-                                        </select>
+                                        <CustomSelect
+                                            value={expenseForm.category}
+                                            onChange={(v) => setExpenseForm((prev) => ({ ...prev, category: v || categories[0]?.name || '' }))}
+                                            placeholder="Category"
+                                            options={categories.map((c) => ({ value: c.name, label: c.name }))}
+                                        />
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="text-[11px] font-black text-[#1A2233] uppercase ml-1">Amount</label>
                                         <input
                                             type="number"
+                                            value={expenseForm.amount}
+                                            onChange={(e) => setExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
                                             placeholder="0 UZS"
                                             className="w-full bg-[#F7F8FA] border border-[#F0F1F5] rounded-xl px-4 py-3 text-[12px] font-bold text-[#1A2233] outline-none"
                                         />
@@ -107,16 +163,22 @@ export default function SettingsPage() {
                                     <div className="relative">
                                         <input
                                             type="date"
+                                            value={expenseForm.date}
+                                            onChange={(e) => setExpenseForm((prev) => ({ ...prev, date: e.target.value }))}
                                             className="w-full bg-[#F7F8FA] border border-[#F0F1F5] rounded-xl px-4 py-3 text-[12px] font-bold text-[#1A2233] outline-none"
                                         />
                                     </div>
                                 </div>
 
-                                <button className="w-full bg-[#ED6A2E] text-white py-3.5 rounded-xl text-[13px] font-black flex items-center justify-center gap-2 hover:bg-[#D95B24] transition-all shadow-md mt-2">
+                                <button
+                                    type="submit"
+                                    disabled={isCreatingExpense || !expenseForm.name.trim() || Number(expenseForm.amount) <= 0}
+                                    className="w-full bg-[#ED6A2E] text-white py-3.5 rounded-xl text-[13px] font-black flex items-center justify-center gap-2 hover:bg-[#D95B24] transition-all shadow-md mt-2 disabled:opacity-50"
+                                >
                                     <Plus size={18} strokeWidth={3} />
-                                    Add Expense
+                                    {isCreatingExpense ? 'Saving...' : 'Add Expense'}
                                 </button>
-                            </div>
+                            </form>
                         </div>
                     </div>
 
@@ -176,7 +238,15 @@ export default function SettingsPage() {
                                                 </div>
                                                 <div className="col-span-12 sm:col-span-2 flex items-center justify-between sm:px-4">
                                                     <span className="text-[11px] font-bold text-[#8A9BB8]">{item.createdAt || '-'}</span>
-                                                    <button className="p-1 text-[#8A9BB8] hover:text-[#1A2233] transition-colors">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (item.id && window.confirm('Delete this expense?')) {
+                                                                deleteExpense(item.id);
+                                                            }
+                                                        }}
+                                                        className="p-1 text-[#8A9BB8] hover:text-[#1A2233] transition-colors"
+                                                    >
                                                         <MoreVertical size={16} />
                                                     </button>
                                                 </div>

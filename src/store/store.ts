@@ -1,5 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit';
 import authReducer from './slices/authSlice';
+import toastReducer from './slices/toastSlice';
 import { authApi } from './api/authApi';
 import { dashboardApi } from './api/dashboardApi';
 import { studentApi } from './api/studentApi';
@@ -19,6 +20,7 @@ import { penaltyApi } from './api/penaltyApi';
 export const store = configureStore({
     reducer: {
         auth: authReducer,
+        toast: toastReducer,
         [authApi.reducerPath]: authApi.reducer,
         [dashboardApi.reducerPath]: dashboardApi.reducer,
         [studentApi.reducerPath]: studentApi.reducer,

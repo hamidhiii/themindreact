@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Calendar, TrendingDown, AlertCircle,
     Plus, LayoutGrid, Download, Wallet
@@ -9,8 +10,10 @@ import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid,
     Tooltip, ResponsiveContainer
 } from 'recharts';
+import { downloadCsv } from '../../utils/downloadCsv';
 
 export default function SalaryPage() {
+    const navigate = useNavigate();
     const { data: salaryDashboard } = useGetSalaryDashboardQuery();
     const { data: financeData } = useGetFinanceQuery();
     const { data: report = [], isLoading: isReportLoading } = useGetSalaryReportQuery();
@@ -55,6 +58,21 @@ export default function SalaryPage() {
         { name: 'Apr', income: 0 },
     ];
 
+    const exportReport = () => {
+        downloadCsv(
+            'salary-report.csv',
+            report.map((row) => ({
+                name: row.name,
+                role: row.role,
+                salary: row.salary,
+                bonus: row.bonus,
+                fine: row.fine,
+                total: row.total,
+                status: row.status,
+            }))
+        );
+    };
+
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
             {/* Header */}
@@ -90,11 +108,19 @@ export default function SalaryPage() {
                     <p className="text-[12px] text-[#8A9BB8] font-bold">Manage student tariff plans</p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <button className="bg-[#ED6A2E] text-white px-5 py-2.5 rounded-xl text-[13px] font-black flex items-center gap-2 hover:bg-[#D95B24] transition-all shadow-md">
+                    <button
+                        type="button"
+                        onClick={() => navigate('/tariff')}
+                        className="bg-[#ED6A2E] text-white px-5 py-2.5 rounded-xl text-[13px] font-black flex items-center gap-2 hover:bg-[#D95B24] transition-all shadow-md"
+                    >
                         <Plus size={18} strokeWidth={3} />
                         Add Tariff
                     </button>
-                    <button className="bg-white border border-[#F0F1F5] text-[#1A2233] px-5 py-2.5 rounded-xl text-[13px] font-black flex items-center gap-2 hover:bg-gray-50 transition-all shadow-sm">
+                    <button
+                        type="button"
+                        onClick={() => navigate('/tariff')}
+                        className="bg-white border border-[#F0F1F5] text-[#1A2233] px-5 py-2.5 rounded-xl text-[13px] font-black flex items-center gap-2 hover:bg-gray-50 transition-all shadow-sm"
+                    >
                         <LayoutGrid size={18} className="text-[#8A9BB8]" />
                         All Tariffs
                     </button>
@@ -184,7 +210,11 @@ export default function SalaryPage() {
                             <Calendar size={16} className="text-[#8A9BB8]" />
                             <span className="text-[12px] font-bold text-[#5A6376]">Current Period</span>
                         </div>
-                        <button className="bg-[#ED6A2E] text-white px-5 py-2.5 rounded-xl text-[12px] font-black flex items-center gap-2 hover:bg-[#D95B24] transition-all">
+                        <button
+                            type="button"
+                            onClick={exportReport}
+                            className="bg-[#ED6A2E] text-white px-5 py-2.5 rounded-xl text-[12px] font-black flex items-center gap-2 hover:bg-[#D95B24] transition-all"
+                        >
                             <Download size={16} strokeWidth={3} />
                             Report
                         </button>

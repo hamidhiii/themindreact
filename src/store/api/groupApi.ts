@@ -1,5 +1,7 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import { axiosBaseQuery } from '../../api/axiosBaseQuery';
+import { ApiPaths } from '../../api/apiPaths';
+import { dataWithFallbacks, extractMapList } from '../../api/apiResponse';
 import type { GroupModel } from '../../types';
 
 function parseWeekDays(raw: unknown): string | undefined {
@@ -50,49 +52,62 @@ export const groupApi = createApi({
   tagTypes: ['Group', 'StudentGroup', 'GroupChoices'],
   endpoints: (builder) => ({
     getGroups: builder.query<GroupModel[], void>({
-      query: () => ({ url: '/group/groups-ui/list/' }),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.group },
+            { url: '/group/groups-ui/list/' },
+          ],
+          (raw) => extractMapList(raw).map(parseGroup)
+        ),
       providesTags: ['Group'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseGroup);
-      },
     }),
     getGroupById: builder.query<GroupModel, number>({
-      query: (id) => ({ url: `/group/groups-ui/${id}/` }),
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.groupId(id) },
+            { url: `/group/groups-ui/${id}/` },
+          ],
+          (raw) => parseGroup(raw as Record<string, unknown>)
+        ),
       providesTags: ['Group'],
-      transformResponse: (raw) => parseGroup(raw as Record<string, unknown>),
     }),
     getGroupsByTeacher: builder.query<GroupModel[], string>({
-      query: (teacherId) => ({ url: '/group/groups-ui/list/', params: { teacher: teacherId } }),
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseGroup);
-      },
+      queryFn: (teacherId, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.group, params: { teacher: teacherId } },
+            { url: '/group/groups-ui/list/', params: { teacher: teacherId } },
+          ],
+          (raw) => extractMapList(raw).map(parseGroup)
+        ),
     }),
     getGroupStudents: builder.query<Record<string, unknown>[], number>({
-      query: (groupId) => ({ url: '/group/student-groups/', params: { group: groupId } }),
+      queryFn: (groupId, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.groupStudents(groupId) },
+            { url: '/group/student-groups/', params: { group: groupId } },
+          ],
+          extractMapList
+        ),
       providesTags: ['StudentGroup'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        if (Array.isArray(data)) return data as Record<string, unknown>[];
-        const m = data as Record<string, unknown>;
-        return (m['results'] as Record<string, unknown>[]) ?? [];
-      },
     }),
     getGroupAttendance: builder.query<Record<string, unknown>[], number>({
-      query: (groupId) => ({ url: '/group/student-groups/', params: { group: groupId } }),
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        if (Array.isArray(data)) return data as Record<string, unknown>[];
-        const m = data as Record<string, unknown>;
-        return (m['results'] as Record<string, unknown>[]) ?? [];
-      },
+      queryFn: (groupId, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.groupStudents(groupId) },
+            { url: '/group/student-groups/', params: { group: groupId } },
+          ],
+          extractMapList
+        ),
     }),
     createGroup: builder.mutation<void, {
       name: string;
@@ -108,23 +123,36 @@ export const groupApi = createApi({
       isActive: boolean;
       teacherFixedSalary: string;
     }>({
-      query: (data) => {
+      queryFn: (data, _api, _extra, baseQuery) => {
+        const teacherId = Number(data.teacher);
         const body: Record<string, unknown> = {
           name: data.name,
           level: data.level,
-          teacher: data.teacher,
           price: data.price,
           start_time: data.startTime,
           end_time: data.endTime,
           is_active: data.isActive,
           week_days: data.weekDays,
         };
+        if (!Number.isNaN(teacherId) && teacherId > 0) {
+          body['teacher'] = teacherId;
+          body['teacher_id'] = teacherId;
+        } else if (data.teacher) {
+          body['teacher'] = data.teacher;
+        }
         if (data.room && data.room > 0) body['room'] = data.room;
         if (data.startDate) body['start_date'] = data.startDate;
         if (data.endDate) body['end_date'] = data.endDate;
         const salaryVal = parseFloat(data.teacherFixedSalary) || 0;
         if (salaryVal > 0) body['teacher_fixed_salary'] = data.teacherFixedSalary;
-        return { url: '/group/groups-ui/create/', method: 'POST', data: body };
+
+        return dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.group, method: 'POST', data: body },
+          ],
+          () => undefined
+        );
       },
       invalidatesTags: ['Group'],
     }),
@@ -159,12 +187,12 @@ export const groupApi = createApi({
         if (data.endDate) body['end_date'] = data.endDate;
         const salaryVal = parseFloat(data.teacherFixedSalary) || 0;
         if (salaryVal > 0) body['teacher_fixed_salary'] = data.teacherFixedSalary;
-        return { url: `/group/groups-ui/${data.id}/update/`, method: 'PATCH', data: body };
+        return { url: ApiPaths.groupId(data.id), method: 'PATCH', data: body };
       },
       invalidatesTags: ['Group'],
     }),
     deleteGroup: builder.mutation<void, number>({
-      query: (id) => ({ url: `/group/groups-ui/${id}/delete/`, method: 'DELETE' }),
+      query: (id) => ({ url: ApiPaths.groupId(id), method: 'DELETE' }),
       invalidatesTags: ['Group'],
     }),
     getGroupCreateFormOptions: builder.query<Record<string, unknown>, void>({
@@ -172,7 +200,7 @@ export const groupApi = createApi({
       providesTags: ['GroupChoices'],
     }),
     getGroupWeekdays: builder.query<Record<string, unknown>[], void>({
-      query: () => ({ url: '/group/groups-ui/choices/weekdays/' }),
+      query: () => ({ url: ApiPaths.groupChoice('weekdays') }),
       providesTags: ['GroupChoices'],
       transformResponse: (raw) => {
         if (Array.isArray(raw)) return raw as Record<string, unknown>[];
@@ -180,7 +208,7 @@ export const groupApi = createApi({
       },
     }),
     getGroupCourses: builder.query<Record<string, unknown>[], void>({
-      query: () => ({ url: '/group/groups-ui/choices/courses/' }),
+      query: () => ({ url: ApiPaths.groupChoice('courses') }),
       providesTags: ['GroupChoices'],
       transformResponse: (raw) => {
         if (Array.isArray(raw)) return raw as Record<string, unknown>[];
@@ -188,7 +216,7 @@ export const groupApi = createApi({
       },
     }),
     getGroupLevels: builder.query<Record<string, unknown>[], void>({
-      query: () => ({ url: '/group/groups-ui/choices/levels/' }),
+      query: () => ({ url: ApiPaths.groupChoice('levels') }),
       providesTags: ['GroupChoices'],
       transformResponse: (raw) => {
         if (Array.isArray(raw)) return raw as Record<string, unknown>[];
@@ -196,7 +224,7 @@ export const groupApi = createApi({
       },
     }),
     getGroupRooms: builder.query<Record<string, unknown>[], void>({
-      query: () => ({ url: '/group/groups-ui/choices/rooms/' }),
+      query: () => ({ url: ApiPaths.groupRooms }),
       providesTags: ['GroupChoices'],
       transformResponse: (raw) => {
         if (Array.isArray(raw)) return raw as Record<string, unknown>[];
@@ -204,7 +232,7 @@ export const groupApi = createApi({
       },
     }),
     getGroupTeacherSalaryTypes: builder.query<Record<string, unknown>[], void>({
-      query: () => ({ url: '/group/groups-ui/choices/teacher-salary-types/' }),
+      query: () => ({ url: ApiPaths.groupChoice('teacher-salary-types') }),
       providesTags: ['GroupChoices'],
       transformResponse: (raw) => {
         if (Array.isArray(raw)) return raw as Record<string, unknown>[];
@@ -212,7 +240,7 @@ export const groupApi = createApi({
       },
     }),
     getGroupTeachers: builder.query<Record<string, unknown>[], void>({
-      query: () => ({ url: '/group/groups-ui/choices/teachers/' }),
+      query: () => ({ url: ApiPaths.teacher }),
       providesTags: ['GroupChoices'],
       transformResponse: (raw) => {
         if (Array.isArray(raw)) return raw as Record<string, unknown>[];

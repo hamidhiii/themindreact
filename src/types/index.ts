@@ -48,6 +48,19 @@ export const AppPages = {
 export interface AuthTokens {
   access: string;
   refresh: string;
+  user?: CurrentUser;
+}
+
+export interface CurrentUser {
+  id: number;
+  username: string;
+  fullName?: string;
+  telegramUsername?: string;
+  phone?: string;
+  systemRole: string;
+  currentBranchId?: number;
+  permissions: Record<string, Record<string, boolean>>;
+  branches: Record<string, unknown>[];
 }
 
 export type AuthErrorType =
@@ -91,10 +104,15 @@ export interface WeeklyModel {
   day: string;
   dayIndex: number;
   count: number;
+  graphCount?: number;
+  fillPercent?: number;
+  maxDailyCapacity?: number;
+  overflowCount?: number;
   leadsCameCount: number;
   trialDoneCount: number;
   leadsStatusCount: number;
   trialsCount: number;
+  trialLeadsCount?: number;
   lessonCount: number;
   leadStatus: string;
 }
@@ -644,6 +662,22 @@ export interface LidModel {
   gender?: string;
   course?: number;
   giveBook: boolean;
+  callCount?: number;
+  isArchived?: boolean;
+  telegramUsername?: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
+  goal?: string;
+  preferredDays?: string;
+  preferredTimeSlot?: string;
+  createdAt?: string;
+}
+
+export interface LeadPipelineSummary {
+  leads: number;
+  waiting: number;
+  calling: number;
+  archived: number;
 }
 
 export interface LidGroupModel {
@@ -776,6 +810,7 @@ export interface TeacherModel {
   fullName: string;
   username: string;
   phoneNumber: string;
+  userId?: string;
   isActive: boolean;
   isSupport: boolean;
   experienceYear: number;
@@ -865,9 +900,11 @@ export interface AdminModel {
   id: string;
   firstName: string;
   lastName: string;
+  fullName?: string;
   role: string;
   roleDisplay: string;
   phoneNumber?: string;
+  teacherId?: string;
   isActive: boolean;
 }
 

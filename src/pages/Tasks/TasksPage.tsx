@@ -1,13 +1,27 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
     Plus, LayoutGrid, List, MoreVertical,
     Calendar, Clock
 } from 'lucide-react';
-import { useGetTasksQuery } from '../../store/api/taskApi';
+import { useCreateTaskMutation, useGetTasksQuery, useUpdateTaskStatusMutation } from '../../store/api/taskApi';
+import ModalShell from '../../components/common/ModalShell';
+import CustomSelect from '../../components/common/CustomSelect';
+import { useToast } from '../../hooks/useToast';
 
 export default function TasksPage() {
     const { data: tasks = [], isLoading } = useGetTasksQuery();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [view, setView] = useState<'board' | 'list'>('board');
+    const [showCreate, setShowCreate] = useState(false);
+    const [updateStatus] = useUpdateTaskStatusMutation();
+
+    useEffect(() => {
+        if (searchParams.get('create') === '1') {
+            setShowCreate(true);
+            setSearchParams({}, { replace: true });
+        }
+    }, [searchParams, setSearchParams]);
 
     const columns = useMemo(() => {
         const counts = tasks.reduce((acc, t) => {
@@ -16,12 +30,18 @@ export default function TasksPage() {
         }, {} as Record<string, number>);
 
         return [
-            { id: 'backlog', label: 'NEED TO BE DONE', color: '#4C6FFF', count: counts.backlog || 0 },
+            { id: 'todo', label: 'NEED TO BE DONE', color: '#4C6FFF', count: counts.todo || 0 },
             { id: 'in_progress', label: 'IN WORK', color: '#ED6A2E', count: counts.in_progress || 0 },
             { id: 'review', label: 'UNDER CHECK', color: '#9B59B6', count: counts.review || 0 },
             { id: 'done', label: 'COMPLETED', color: '#2ECC81', count: counts.done || 0 },
         ];
     }, [tasks]);
+
+    const nextStatus = (status: string) => {
+        const order = ['todo', 'in_progress', 'review', 'done'];
+        const index = order.indexOf(status);
+        return order[Math.min(order.length - 1, Math.max(0, index) + 1)];
+    };
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -40,7 +60,11 @@ export default function TasksPage() {
                             </div>
                         ))}
                     </div>
-                    <button className="w-full sm:w-auto bg-[#ED6A2E] text-white px-5 py-2.5 rounded-xl text-[13px] font-black flex items-center justify-center gap-2 hover:bg-[#D95B24] transition-all shadow-[0_4px_12px_rgba(237,106,46,0.3)]">
+                    <button
+                        type="button"
+                        onClick={() => setShowCreate(true)}
+                        className="w-full sm:w-auto bg-[#ED6A2E] text-white px-5 py-2.5 rounded-xl text-[13px] font-black flex items-center justify-center gap-2 hover:bg-[#D95B24] transition-all shadow-[0_4px_12px_rgba(237,106,46,0.3)]"
+                    >
                         <Plus size={18} strokeWidth={3} />
                         New Task
                     </button>
@@ -89,7 +113,15 @@ export default function TasksPage() {
                                                 {task.tag || 'Global'}
                                             </div>
                                             <div className="flex items-center gap-1.5">
-                                                <MoreVertical size={16} className="text-[#8A9BB8] cursor-pointer" />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateStatus({ id: task.id, status: nextStatus(task.status) })}
+                                                    disabled={task.status === 'done'}
+                                                    className="rounded-lg p-1 text-[#8A9BB8] transition-colors hover:bg-[#F5F6FA] hover:text-[#ED6A2E] disabled:opacity-30"
+                                                    title="Move to next status"
+                                                >
+                                                    <MoreVertical size={16} />
+                                                </button>
                                             </div>
                                         </div>
 
@@ -125,6 +157,7 @@ export default function TasksPage() {
                                 <th className="text-left px-6 py-4 text-[10px] font-black text-[#8A9BB8] uppercase tracking-widest">Status</th>
                                 <th className="text-left px-6 py-4 text-[10px] font-black text-[#8A9BB8] uppercase tracking-widest">Tag</th>
                                 <th className="text-left px-6 py-4 text-[10px] font-black text-[#8A9BB8] uppercase tracking-widest">Date</th>
+                                <th className="text-right px-6 py-4 text-[10px] font-black text-[#8A9BB8] uppercase tracking-widest">Action</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-[#F0F1F5]">
@@ -138,12 +171,94 @@ export default function TasksPage() {
                                     </td>
                                     <td className="px-6 py-4 text-[12px] font-bold text-[#8A9BB8] uppercase tracking-wide">{task.tag}</td>
                                     <td className="px-6 py-4 text-[12px] font-bold text-[#8A9BB8]">{task.deadline || '-'}</td>
+                                    <td className="px-6 py-4 text-right">
+                                        <button
+                                            type="button"
+                                            onClick={() => updateStatus({ id: task.id, status: nextStatus(task.status) })}
+                                            disabled={task.status === 'done'}
+                                            className="rounded-lg border border-[#F0F1F5] px-3 py-1.5 text-[11px] font-black text-[#ED6A2E] transition-colors hover:bg-[#FFF5F2] disabled:opacity-30"
+                                        >
+                                            Next
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
             )}
+
+            {showCreate && <TaskCreateDialog onClose={() => setShowCreate(false)} />}
         </div>
+    );
+}
+
+function TaskCreateDialog({ onClose }: { onClose: () => void }) {
+    const [createTask, { isLoading }] = useCreateTaskMutation();
+    const toast = useToast();
+    const [form, setForm] = useState({
+        title: '',
+        description: '',
+        status: 'todo',
+        priority: 'medium',
+        tag: '',
+        deadline: '',
+    });
+
+    const submit = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!form.title.trim()) return;
+        await createTask({
+            title: form.title.trim(),
+            description: form.description.trim(),
+            status: form.status,
+            priority: form.priority,
+            tag: form.tag.trim() || undefined,
+            deadline: form.deadline || undefined,
+        }).unwrap();
+        toast.success('Task created successfully');
+        onClose();
+    };
+
+    return (
+        <ModalShell title="New task" onClose={onClose}>
+            <form onSubmit={submit} className="space-y-4 p-5">
+                <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Task title" className="w-full rounded-xl border border-[#F0F1F5] px-4 py-3 text-[13px] font-bold outline-none focus:border-[#ED6A2E]" required />
+                <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Description" className="min-h-24 w-full rounded-xl border border-[#F0F1F5] px-4 py-3 text-[13px] font-bold outline-none focus:border-[#ED6A2E]" />
+                <div className="grid grid-cols-2 gap-3">
+                    <CustomSelect
+                        value={form.status}
+                        onChange={(v) => setForm({ ...form, status: v || 'todo' })}
+                        placeholder="Status"
+                        options={[
+                            { value: 'todo', label: 'Need to do' },
+                            { value: 'in_progress', label: 'In work' },
+                            { value: 'review', label: 'Under check' },
+                            { value: 'done', label: 'Completed' },
+                        ]}
+                    />
+                    <CustomSelect
+                        value={form.priority}
+                        onChange={(v) => setForm({ ...form, priority: v || 'medium' })}
+                        placeholder="Priority"
+                        options={[
+                            { value: 'low', label: 'Low' },
+                            { value: 'medium', label: 'Medium' },
+                            { value: 'high', label: 'High' },
+                        ]}
+                    />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <input value={form.tag} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="Tag" className="rounded-xl border border-[#F0F1F5] px-4 py-3 text-[13px] font-bold outline-none focus:border-[#ED6A2E]" />
+                    <input type="date" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} className="rounded-xl border border-[#F0F1F5] px-4 py-3 text-[13px] font-bold outline-none focus:border-[#ED6A2E]" />
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={onClose} className="rounded-xl px-4 py-2.5 text-[13px] font-bold text-[#8A9BB8] hover:bg-gray-50">Cancel</button>
+                    <button type="submit" disabled={isLoading || !form.title.trim()} className="rounded-xl bg-[#ED6A2E] px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50">
+                        {isLoading ? 'Saving...' : 'Create'}
+                    </button>
+                </div>
+            </form>
+        </ModalShell>
     );
 }

@@ -4,6 +4,7 @@ import { useDispatch } from 'react-redux';
 import { Eye, EyeOff, Lock, User as UserIcon, Check } from 'lucide-react';
 import { useLoginMutation } from '../../store/api/authApi';
 import { setCredentials } from '../../store/slices/authSlice';
+import { selectBranch, ensureDefaultBranch } from '../../utils/branchContext';
 import logo from '../../assets/logo.png';
 
 export default function AuthPage() {
@@ -24,15 +25,37 @@ export default function AuthPage() {
         try {
             const result = await login({ username: username.trim(), password: password.trim() }).unwrap();
 
-            let role = 'admin';
+            let role = result.user?.systemRole || 'admin';
             try {
                 const payload = JSON.parse(atob(result.access.split('.')[1]));
-                role = payload.role ?? payload.user_role ?? 'admin';
+                role = result.user?.systemRole || payload.role || payload.user_role || 'admin';
             } catch {
-                role = 'admin';
+                role = result.user?.systemRole || 'admin';
             }
 
-            dispatch(setCredentials({ accessToken: result.access, refreshToken: result.refresh, role }));
+            dispatch(setCredentials({
+                accessToken: result.access,
+                refreshToken: result.refresh,
+                role,
+                username: result.user?.username,
+            }));
+
+            const currentBranchId = result.user?.currentBranchId;
+            const branches = result.user?.branches ?? [];
+            if (currentBranchId && currentBranchId > 0) {
+                const match = branches.find((b) => Number((b as Record<string, unknown>)['id'] ?? (b as Record<string, unknown>)['branch_id']) === currentBranchId);
+                const name = match
+                    ? String((match as Record<string, unknown>)['name'] ?? (match as Record<string, unknown>)['title'] ?? `Branch ${currentBranchId}`)
+                    : `Branch ${currentBranchId}`;
+                selectBranch(currentBranchId, name);
+            } else if (branches.length > 0) {
+                const first = branches[0] as Record<string, unknown>;
+                const id = String(first['id'] ?? first['branch_id'] ?? '1');
+                const name = String(first['name'] ?? first['title'] ?? 'Main');
+                selectBranch(id, name);
+            } else {
+                ensureDefaultBranch();
+            }
 
             if (role === 'support_teacher') {
                 navigate('/support-teacher-home');
@@ -184,7 +207,13 @@ export default function AuthPage() {
                             <div className="space-y-2 lg:space-y-2.5">
                                 <div className="flex justify-between items-center">
                                     <label className="text-[13px] font-semibold text-[#1A2233]">Password</label>
-                                    <button type="button" className="text-[12px] text-gray-400 font-medium hover:text-primary transition-colors">Forgot password?</button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setError('Contact an administrator to reset your password')}
+                                        className="text-[12px] text-gray-400 font-medium hover:text-primary transition-colors"
+                                    >
+                                        Forgot password?
+                                    </button>
                                 </div>
                                 <div className={`relative transition-all duration-200 rounded-xl ${isFocused === 'password' ? 'shadow-[0_4px_14px_rgba(237,106,46,0.15)]' : 'shadow-[0_2px_6px_rgba(0,0,0,0.04)]'}`}>
                                     <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">

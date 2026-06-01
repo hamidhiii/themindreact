@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { ApiPaths } from './apiPaths';
+import { getSelectedBranchId, getSelectedBranchName } from '../utils/branchContext';
 
 const DEFAULT_API_BASE_URL = 'https://crm1.the-mind.uz/api';
 
@@ -7,19 +9,20 @@ function normalizeBaseUrl(value?: string): string {
     return raw.replace(/\/+$/, '');
 }
 
-function readStorage(keys: string[]): string | null {
-    for (const key of keys) {
-        const value = localStorage.getItem(key);
-        if (value && value.trim()) return value.trim();
-    }
-    return null;
-}
-
 function isLatin1Only(value: string): boolean {
     for (let i = 0; i < value.length; i += 1) {
         if (value.charCodeAt(i) > 0xff) return false;
     }
     return true;
+}
+
+function needsBranchHeader(path?: string): boolean {
+    if (!path) return false;
+    const isAuth =
+        path.includes('/token/') ||
+        path.includes(ApiPaths.authLogin) ||
+        path.includes(ApiPaths.authRefresh);
+    return !isAuth;
 }
 
 const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
@@ -35,17 +38,23 @@ const axiosInstance = axios.create({
 axiosInstance.interceptors.request.use((config) => {
     const token = localStorage.getItem('accessToken');
     const isTokenRoute =
-        config.url?.includes('/token/') || config.url?.includes('/token/refresh/');
+        config.url?.includes('/token/') ||
+        config.url?.includes('/token/refresh/') ||
+        config.url?.includes(ApiPaths.authLogin) ||
+        config.url?.includes(ApiPaths.authRefresh);
 
     if (token && !isTokenRoute) {
         config.headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const branchId = readStorage(['selectedBranchId', 'branchId', 'branch_id']);
-    const branchName = readStorage(['selectedBranchName', 'branchName', 'branch_name']);
-
+    let branchId = getSelectedBranchId();
+    const branchName = getSelectedBranchName();
+    if (!branchId && needsBranchHeader(config.url)) {
+        branchId = '1';
+    }
     if (branchId) {
-        config.headers['X-Branch-Id'] = branchId;
+        config.headers['x-branch-id'] = String(branchId);
+        config.headers['X-Branch-Id'] = String(branchId);
     }
     if (branchName && isLatin1Only(branchName)) {
         config.headers['X-Branch-Name'] = branchName;
@@ -67,6 +76,40 @@ const processQueue = (error: unknown, token: string | null = null) => {
     });
     failedQueue = [];
 };
+
+function readTokenPayload(data: unknown): { access?: string; refresh?: string } {
+    const raw = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+    const nested = raw['data'] && typeof raw['data'] === 'object'
+        ? raw['data'] as Record<string, unknown>
+        : raw;
+    const access = nested['access'] ?? nested['access_token'] ?? nested['token'];
+    const refresh = nested['refresh'] ?? nested['refresh_token'];
+    return {
+        access: typeof access === 'string' ? access : undefined,
+        refresh: typeof refresh === 'string' ? refresh : undefined,
+    };
+}
+
+async function refreshAccessToken(refreshToken: string): Promise<{ access: string; refresh?: string }> {
+    const body = { refresh: refreshToken };
+    const candidates = [ApiPaths.authRefresh, '/token/refresh/'];
+    let lastError: unknown;
+
+    for (const path of candidates) {
+        try {
+            const res = await axios.post(`${BASE_URL}${path}`, body);
+            const tokens = readTokenPayload(res.data);
+            if (tokens.access) return { access: tokens.access, refresh: tokens.refresh };
+            throw new Error('Refresh response does not include an access token');
+        } catch (error: unknown) {
+            lastError = error;
+            const status = (error as { response?: { status?: number } }).response?.status;
+            if (status !== 404 && status !== 405 && status !== 410) break;
+        }
+    }
+
+    throw lastError;
+}
 
 axiosInstance.interceptors.response.use(
     (response) => response,
@@ -92,12 +135,9 @@ axiosInstance.interceptors.response.use(
                 const refreshToken = localStorage.getItem('refreshToken');
                 if (!refreshToken) throw new Error('No refresh token');
 
-                const res = await axios.post(`${BASE_URL}/token/refresh/`, {
-                    refresh: refreshToken,
-                });
-
-                const newToken: string = res.data.access;
-                const newRefresh: string | undefined = res.data.refresh;
+                const tokens = await refreshAccessToken(refreshToken);
+                const newToken = tokens.access;
+                const newRefresh = tokens.refresh;
                 localStorage.setItem('accessToken', newToken);
                 if (newRefresh) {
                     localStorage.setItem('refreshToken', newRefresh);

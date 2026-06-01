@@ -1,5 +1,7 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import { axiosBaseQuery } from '../../api/axiosBaseQuery';
+import { ApiPaths } from '../../api/apiPaths';
+import { dataWithFallbacks, extractMapList } from '../../api/apiResponse';
 import type { ExpenseModel, RoomSettingModel } from '../../types';
 
 function parseRoomSetting(j: Record<string, unknown>): RoomSettingModel {
@@ -47,26 +49,20 @@ export const settingsApi = createApi({
   tagTypes: ['Expense', 'SettingsRoom', 'Branch', 'Role', 'Marketing'],
   endpoints: (builder) => ({
     getExpenses: builder.query<ExpenseModel[], void>({
-      query: () => ({ url: '/settings/expenses/' }),
+      query: () => ({ url: ApiPaths.settingsExpenses }),
       providesTags: ['Expense'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseExpense);
-      },
+      transformResponse: (raw) => extractMapList(raw).map(parseExpense),
     }),
     getExpenseLimit: builder.query<Record<string, unknown>, void>({
-      query: () => ({ url: '/settings/expenses/limit/' }),
+      query: () => ({ url: ApiPaths.settingsExpensesLimit }),
       providesTags: ['Expense'],
     }),
     patchExpenseLimit: builder.mutation<Record<string, unknown>, Record<string, unknown>>({
-      query: (data) => ({ url: '/settings/expenses/limit/', method: 'PATCH', data }),
+      query: (data) => ({ url: ApiPaths.settingsExpensesLimit, method: 'POST', data }),
       invalidatesTags: ['Expense'],
     }),
     getExpenseCategories: builder.query<Record<string, unknown>[], void>({
-      query: () => ({ url: '/settings/expenses/categories' }),
+      query: () => ({ url: ApiPaths.settingsExpenseCategories }),
       providesTags: ['Expense'],
       transformResponse: (raw) => {
         if (Array.isArray(raw)) return raw as Record<string, unknown>[];
@@ -81,7 +77,7 @@ export const settingsApi = createApi({
       comment?: string;
     }>({
       query: (data) => ({
-        url: '/settings/expenses/',
+        url: ApiPaths.settingsExpenses,
         method: 'POST',
         data: expenseToBody(data),
       }),
@@ -97,7 +93,7 @@ export const settingsApi = createApi({
       comment?: string;
     }>({
       query: (data) => ({
-        url: `/settings/expenses/${data.id}/`,
+        url: ApiPaths.settingsExpense(data.id),
         method: 'PATCH',
         data: expenseToBody(data),
       }),
@@ -105,20 +101,21 @@ export const settingsApi = createApi({
       transformResponse: (raw) => parseExpense(raw as Record<string, unknown>),
     }),
     deleteExpense: builder.mutation<void, number>({
-      query: (id) => ({ url: `/settings/expenses/${id}/`, method: 'DELETE' }),
+      query: (id) => ({ url: ApiPaths.settingsExpense(id), method: 'DELETE' }),
       invalidatesTags: ['Expense'],
     }),
 
     getSettingsRooms: builder.query<RoomSettingModel[], void>({
-      query: () => ({ url: '/group/rooms/' }),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.analyticsRooms },
+            { url: '/group/rooms/' },
+          ],
+          (raw) => extractMapList(raw).map(parseRoomSetting)
+        ),
       providesTags: ['SettingsRoom'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseRoomSetting);
-      },
     }),
     createSettingsRoom: builder.mutation<RoomSettingModel, {
       name: string;
@@ -127,7 +124,7 @@ export const settingsApi = createApi({
       endTime: string;
     }>({
       query: (data) => ({
-        url: '/group/rooms/',
+        url: ApiPaths.analyticsRooms,
         method: 'POST',
         data: {
           name: data.name,
@@ -147,7 +144,7 @@ export const settingsApi = createApi({
       endTime: string;
     }>({
       query: (data) => ({
-        url: `/group/rooms/${data.id}/`,
+        url: ApiPaths.analyticsRoom(data.id),
         method: 'PATCH',
         data: {
           name: data.name,
@@ -160,19 +157,23 @@ export const settingsApi = createApi({
       transformResponse: (raw) => parseRoomSetting(raw as Record<string, unknown>),
     }),
     deleteSettingsRoom: builder.mutation<void, number>({
-      query: (id) => ({ url: `/group/rooms/${id}/`, method: 'DELETE' }),
+      query: (id) => ({ url: ApiPaths.analyticsRoom(id), method: 'DELETE' }),
       invalidatesTags: ['SettingsRoom'],
     }),
     getBranches: builder.query<Record<string, unknown>[], void>({
-      query: () => ({ url: '/settings/branches/' }),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.workerBranches },
+            { url: ApiPaths.settingsBranches },
+          ],
+          (raw) => extractMapList(raw)
+        ),
       providesTags: ['Branch'],
-      transformResponse: (raw) => {
-        if (Array.isArray(raw)) return raw as Record<string, unknown>[];
-        return ((raw as Record<string, unknown>)?.['results'] as Record<string, unknown>[]) ?? [];
-      },
     }),
     createBranch: builder.mutation<Record<string, unknown>, Record<string, unknown>>({
-      query: (data) => ({ url: '/settings/branches/', method: 'POST', data }),
+      query: (data) => ({ url: ApiPaths.settingsBranches, method: 'POST', data }),
       invalidatesTags: ['Branch'],
     }),
     switchBranch: builder.mutation<void, string | number>({
@@ -180,15 +181,12 @@ export const settingsApi = createApi({
       invalidatesTags: ['Branch'],
     }),
     getRoles: builder.query<Record<string, unknown>[], void>({
-      query: () => ({ url: '/settings/roles/' }),
+      query: () => ({ url: ApiPaths.settingsRoles }),
       providesTags: ['Role'],
-      transformResponse: (raw) => {
-        if (Array.isArray(raw)) return raw as Record<string, unknown>[];
-        return ((raw as Record<string, unknown>)?.['results'] as Record<string, unknown>[]) ?? [];
-      },
+      transformResponse: (raw) => extractMapList(raw),
     }),
     createRole: builder.mutation<Record<string, unknown>, Record<string, unknown>>({
-      query: (data) => ({ url: '/settings/roles/', method: 'POST', data }),
+      query: (data) => ({ url: ApiPaths.settingsRoles, method: 'POST', data }),
       invalidatesTags: ['Role'],
     }),
     patchRolePermissions: builder.mutation<void, { id: string; permissions: unknown }>({
@@ -200,27 +198,27 @@ export const settingsApi = createApi({
       invalidatesTags: ['Role'],
     }),
     getMyAccess: builder.query<Record<string, unknown>, void>({
-      query: () => ({ url: '/settings/roles/my-access/' }),
+      query: () => ({ url: ApiPaths.settingsRolesMyPermissions }),
       providesTags: ['Role'],
     }),
     getMarketingFunnel: builder.query<Record<string, unknown>, void>({
-      query: () => ({ url: '/settings/marketing/funnel/' }),
+      query: () => ({ url: ApiPaths.settingsMarketingFunnel }),
       providesTags: ['Marketing'],
     }),
     createMarketingFunnelStage: builder.mutation<Record<string, unknown>, Record<string, unknown>>({
-      query: (data) => ({ url: '/settings/marketing/funnel-stages/', method: 'POST', data }),
+      query: (data) => ({ url: ApiPaths.settingsMarketingFunnelStage, method: 'POST', data }),
       invalidatesTags: ['Marketing'],
     }),
     patchMarketingFunnelStage: builder.mutation<Record<string, unknown>, { id: string | number; data: Record<string, unknown> }>({
-      query: ({ id, data }) => ({ url: `/settings/marketing/funnel-stages/${id}/`, method: 'PATCH', data }),
+      query: ({ id, data }) => ({ url: ApiPaths.settingsMarketingFunnelStageId(id), method: 'PATCH', data }),
       invalidatesTags: ['Marketing'],
     }),
     moveMarketingFunnelStage: builder.mutation<void, { id: string | number; direction?: string; position?: number }>({
-      query: ({ id, ...data }) => ({ url: `/settings/marketing/funnel-stages/${id}/move/`, method: 'POST', data }),
+      query: ({ id, ...data }) => ({ url: ApiPaths.settingsMarketingFunnelStageId(id), method: 'POST', data }),
       invalidatesTags: ['Marketing'],
     }),
     getMarketingSources: builder.query<Record<string, unknown>[], void>({
-      query: () => ({ url: '/settings/marketing/sources/' }),
+      query: () => ({ url: ApiPaths.settingsMarketingSources }),
       providesTags: ['Marketing'],
       transformResponse: (raw) => {
         if (Array.isArray(raw)) return raw as Record<string, unknown>[];
@@ -236,7 +234,7 @@ export const settingsApi = createApi({
       },
     }),
     createMarketingSource: builder.mutation<Record<string, unknown>, Record<string, unknown>>({
-      query: (data) => ({ url: '/settings/marketing/sources/', method: 'POST', data }),
+      query: (data) => ({ url: ApiPaths.settingsMarketingSources, method: 'POST', data }),
       invalidatesTags: ['Marketing'],
     }),
     createMarketingSourceSpend: builder.mutation<Record<string, unknown>, { sourceId: string | number; data: Record<string, unknown> }>({
@@ -256,7 +254,7 @@ export const settingsApi = createApi({
       },
     }),
     getMarketingOverview: builder.query<Record<string, unknown>, void>({
-      query: () => ({ url: '/settings/marketing/overview/' }),
+      query: () => ({ url: ApiPaths.settingsMarketingOverview }),
       providesTags: ['Marketing'],
     }),
     getMarketingLeadStats: builder.query<Record<string, unknown>, void>({

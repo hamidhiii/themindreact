@@ -1,5 +1,7 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import { axiosBaseQuery } from '../../api/axiosBaseQuery';
+import { ApiPaths } from '../../api/apiPaths';
+import { dataWithFallbacks, extractMapList } from '../../api/apiResponse';
 import type { ExamModel } from '../../types';
 
 function parseExam(j: Record<string, unknown>): ExamModel {
@@ -33,28 +35,36 @@ export const examApi = createApi({
   tagTypes: ['Exam'],
   endpoints: (builder) => ({
     getExamDashboard: builder.query<Record<string, unknown>, void>({
-      query: () => ({ url: '/exam/exams/dashboard/' }),
+      query: () => ({ url: ApiPaths.exam }),
       providesTags: ['Exam'],
     }),
     getExamChoices: builder.query<Record<string, unknown>, void>({
-      query: () => ({ url: '/exam/exams/ui-choices/' }),
+      query: () => ({ url: '/exam/ui-choices/' }),
       providesTags: ['Exam'],
     }),
     getExams: builder.query<ExamModel[], void>({
-      query: () => ({ url: '/exam/exams/' }),
+      queryFn: (_arg, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.exam },
+            { url: '/exam/exams/' },
+          ],
+          (raw) => extractMapList(raw).map(parseExam)
+        ),
       providesTags: ['Exam'],
-      transformResponse: (raw) => {
-        const data = raw as unknown;
-        const list: Record<string, unknown>[] = Array.isArray(data)
-          ? (data as Record<string, unknown>[])
-          : ((data as Record<string, unknown>)?.['results'] as Record<string, unknown>[] ?? []);
-        return list.map(parseExam);
-      },
     }),
     getExamById: builder.query<ExamModel, string>({
-      query: (id) => ({ url: `/exam/exams/${id}/` }),
+      queryFn: (id, _api, _extra, baseQuery) =>
+        dataWithFallbacks(
+          baseQuery,
+          [
+            { url: ApiPaths.examId(id) },
+            { url: `/exam/exams/${id}/` },
+          ],
+          (raw) => parseExam(raw as Record<string, unknown>)
+        ),
       providesTags: ['Exam'],
-      transformResponse: (raw) => parseExam(raw as Record<string, unknown>),
     }),
     createExam: builder.mutation<void, {
       title: string;
@@ -69,7 +79,7 @@ export const examApi = createApi({
       createdBy: string;
     }>({
       query: (data) => ({
-        url: '/exam/exams/',
+        url: ApiPaths.exam,
         method: 'POST',
         data: {
           title: data.title,
@@ -99,7 +109,7 @@ export const examApi = createApi({
       isActive: boolean;
     }>({
       query: (data) => ({
-        url: `/exam/exams/${data.id}/`,
+        url: ApiPaths.examId(data.id),
         method: 'PATCH',
         data: {
           title: data.title,
@@ -116,18 +126,18 @@ export const examApi = createApi({
       invalidatesTags: ['Exam'],
     }),
     deleteExam: builder.mutation<void, string>({
-      query: (id) => ({ url: `/exam/exams/${id}/`, method: 'DELETE' }),
+      query: (id) => ({ url: ApiPaths.examId(id), method: 'DELETE' }),
       invalidatesTags: ['Exam'],
     }),
     saveExamResults: builder.mutation<void, { examId: string; status: string; results: unknown[] }>({
       query: ({ examId, status, results }) => ({
-        url: `/exam/exams/${examId}/results/`,
+        url: ApiPaths.examResults(examId),
         method: 'POST',
         data: { status, results },
       }),
     }),
     getExamStudents: builder.query<Record<string, unknown>[], string>({
-      query: (examId) => ({ url: `/exam/exams/${examId}/students/` }),
+      query: (examId) => ({ url: ApiPaths.examResults(examId) }),
       transformResponse: (raw) => {
         if (Array.isArray(raw)) return raw as Record<string, unknown>[];
         return ((raw as Record<string, unknown>)?.['results'] as Record<string, unknown>[]) ?? [];

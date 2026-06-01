@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Calendar,
     ChevronDown,
@@ -15,6 +16,7 @@ import {
     useGetSalaryDashboardQuery,
     useGetStaffSalariesQuery,
 } from '../../store/api/salaryApi';
+import { downloadCsv } from '../../utils/downloadCsv';
 
 interface StatCardProps {
     label: string;
@@ -44,11 +46,13 @@ const StatCard = ({ label, value, trend, icon: Icon, color, trendColor }: StatCa
 );
 
 export default function TeachersPage() {
+    const navigate = useNavigate();
     const { data: teachers = [], isLoading: isTeachersLoading } = useGetTeachersQuery();
     const { data: staffSalaries = [] } = useGetStaffSalariesQuery();
     const { data: salaryDashboard } = useGetSalaryDashboardQuery();
     const { data: financeData } = useGetFinanceQuery();
     const [search, setSearch] = useState('');
+    const [period, setPeriod] = useState('Current Month');
 
     const salaryTotal = staffSalaries.reduce((sum, row) => sum + Number(row.fixedAmount ?? 0), 0);
     const staffRows = useMemo(() => {
@@ -98,6 +102,23 @@ export default function TeachersPage() {
         },
     ];
 
+    const togglePeriod = () => {
+        setPeriod((current) => (current === 'Current Month' ? 'Last Month' : 'Current Month'));
+    };
+
+    const exportRows = () => {
+        downloadCsv(
+            'teacher-finance.csv',
+            staffRows.map((row) => ({
+                name: row.fullName,
+                students: 0,
+                income: row.income,
+                salary: row.salary,
+                profit: row.profit,
+            }))
+        );
+    };
+
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
             <div className="flex items-center justify-between gap-4">
@@ -106,12 +127,20 @@ export default function TeachersPage() {
                     <p className="text-[13px] text-[#8A9BB8] font-bold mt-1">Tracking the financial performance of teaching staff</p>
                 </div>
                 <div className="flex flex-col sm:flex-row items-center gap-3">
-                    <button className="bg-white border border-[#F0F1F5] px-4 py-2.5 rounded-xl text-[13px] font-bold text-[#1A2233] flex items-center gap-2 hover:bg-gray-50 transition-all shadow-sm">
+                    <button
+                        type="button"
+                        onClick={togglePeriod}
+                        className="bg-white border border-[#F0F1F5] px-4 py-2.5 rounded-xl text-[13px] font-bold text-[#1A2233] flex items-center gap-2 hover:bg-gray-50 transition-all shadow-sm"
+                    >
                         <Calendar size={16} className="text-[#8A9BB8]" />
-                        Current Month
+                        {period}
                         <ChevronDown size={16} className="text-[#8A9BB8]" />
                     </button>
-                    <button className="bg-[#ED6A2E] text-white px-5 py-2.5 rounded-xl text-[13px] font-black flex items-center gap-2 hover:bg-[#D95B24] transition-all shadow-[0_4px_12px_rgba(237,106,46,0.3)]">
+                    <button
+                        type="button"
+                        onClick={exportRows}
+                        className="bg-[#ED6A2E] text-white px-5 py-2.5 rounded-xl text-[13px] font-black flex items-center gap-2 hover:bg-[#D95B24] transition-all shadow-[0_4px_12px_rgba(237,106,46,0.3)]"
+                    >
                         <Download size={18} strokeWidth={3} />
                         Export
                     </button>
@@ -172,7 +201,11 @@ export default function TeachersPage() {
                                             <span className="text-[14px] font-black text-[#2ECC81]">{row.profit.toLocaleString()} UZS</span>
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <button className="p-2 text-[#8A9BB8] hover:text-[#ED6A2E] hover:bg-white rounded-lg transition-all border border-transparent hover:border-[#F0F1F5]">
+                                            <button
+                                                type="button"
+                                                onClick={() => navigate(`/teachers/details/${row.id}`)}
+                                                className="p-2 text-[#8A9BB8] hover:text-[#ED6A2E] hover:bg-white rounded-lg transition-all border border-transparent hover:border-[#F0F1F5]"
+                                            >
                                                 <Eye size={20} />
                                             </button>
                                         </td>
@@ -189,7 +222,7 @@ export default function TeachersPage() {
                     <span>Shown {staffRows.length} from {staffRows.length || teachers.length} teachers</span>
                     <div className="flex items-center gap-2">
                         <button className="p-2 rounded-lg border border-[#F0F1F5] hover:bg-gray-50 transition-all disabled:opacity-50" disabled>&lt;</button>
-                        <button className="w-8 h-8 rounded-lg bg-[#ED6A2E] text-white text-[12px] font-black shadow-lg shadow-[#ED6A2E]/30">1</button>
+                        <button className="w-8 h-8 rounded-lg bg-[#ED6A2E] text-white text-[12px] font-black shadow-lg shadow-[#ED6A2E]/30" disabled aria-current="page">1</button>
                         <button className="p-2 rounded-lg border border-[#F0F1F5] hover:bg-gray-50 transition-all disabled:opacity-50" disabled>&gt;</button>
                     </div>
                 </div>
