@@ -662,8 +662,11 @@ export interface LidModel {
   gender?: string;
   course?: number;
   giveBook: boolean;
+  trialGroup?: number | string;
+  trialGroupName?: string;
   callCount?: number;
   isArchived?: boolean;
+  came?: boolean;
   telegramUsername?: string;
   scheduledDate?: string;
   scheduledTime?: string;
@@ -718,6 +721,9 @@ export interface LeadChoicesModel {
   statuses: LeadChoiceItem[];
   sources: LeadChoiceItem[];
   genders: LeadChoiceItem[];
+  goals?: LeadChoiceItem[];
+  preferredDays?: LeadChoiceItem[];
+  preferredTimes?: LeadChoiceItem[];
   groups: LeadGroupItem[];
   books: LeadBookItem[];
 }
@@ -778,6 +784,7 @@ export interface TaskApiModel {
   deadline?: string;
   isCompleted: boolean;
   assignedTo?: string;
+  assignedToName?: string;
   createdAt: string;
 }
 
@@ -934,6 +941,8 @@ export interface AppNotification {
 
 export interface TaskNotificationModel {
   id: string;
+  title?: string;
+  type?: string;
   createdAt: string;
   updatedAt?: string;
   message: string;
@@ -941,4 +950,6 @@ export interface TaskNotificationModel {
   createdBy?: string;
   modifiedBy?: string;
   user?: string;
+  task?: string;
+  taskTitle?: string;
 }

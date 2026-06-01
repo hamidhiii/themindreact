@@ -114,6 +114,7 @@ export default function AddStudentStepperDialog({ onClose }: { onClose: () => vo
                 source: form.source || undefined,
                 phone: form.phone.trim(),
                 parentPhone: form.additionalPhone.trim() || undefined,
+                telegram: form.telegramUsername.trim() || undefined,
                 status: 'active',
                 groupId: form.groupId || undefined,
             }).unwrap();
@@ -128,15 +129,19 @@ export default function AddStudentStepperDialog({ onClose }: { onClose: () => vo
                         studentId: created.id,
                         groupId: Number(form.groupId),
                     }).unwrap();
-                } catch {
-                    // group may already be set via create payload
+                } catch (groupErr) {
+                    toast.info(
+                        `Student #${created.id} created, but group assign failed: ${formatApiError(groupErr)}`,
+                    );
                 }
             }
 
             if (form.enrollmentPayment) {
                 const tariff = tariffs.find((t) => String(t.id) === form.tariffId);
                 const amount = tariff?.price ?? '0';
-                if (Number(amount) > 0) {
+                if (!form.tariffId && tariffs.length > 0) {
+                    toast.info('Student created. Select a tariff to record enrollment payment.');
+                } else if (Number(amount) > 0) {
                     try {
                         await createPayment({
                             studentId: created.id,
@@ -145,8 +150,9 @@ export default function AddStudentStepperDialog({ onClose }: { onClose: () => vo
                             groupId: form.groupId || undefined,
                         }).unwrap();
                     } catch (paymentErr) {
-                        setError(`Student saved, but payment failed: ${formatApiError(paymentErr)}`);
-                        return;
+                        toast.info(
+                            `Student #${created.id} created. Payment failed: ${formatApiError(paymentErr)}`,
+                        );
                     }
                 }
             }

@@ -317,14 +317,55 @@ function parseSearchModel(j: Record<string, unknown>): SearchModel {
 }
 
 function parseAttendanceStat(j: Record<string, unknown>): AttendanceStatModel {
+  const attended = asInt(
+    j['attended']
+    ?? j['present']
+    ?? j['came']
+    ?? j['arrived']
+    ?? j['attended_count']
+    ?? j['present_count']
+    ?? j['came_count']
+    ?? j['arrived_count']
+  );
+  const absent = asInt(
+    j['absent']
+    ?? j['not_came']
+    ?? j['notCame']
+    ?? j['missed']
+    ?? j['absent_count']
+    ?? j['not_came_count']
+    ?? j['missed_count']
+  );
+  const total = asInt(j['total'] ?? j['total_count']) || attended + absent;
   return {
-    date: String(j['date'] ?? ''),
-    present: asInt(j['present']),
-    attended: asInt(j['attended']),
-    absent: asInt(j['absent']),
-    total: asInt(j['total']),
-    rate: asNum(j['rate']),
+    date: String(j['date'] ?? j['day'] ?? j['lesson_date'] ?? j['created_at'] ?? ''),
+    present: attended,
+    attended,
+    absent,
+    total,
+    rate: asNum(j['rate']) || (total > 0 ? Math.round((attended / total) * 100) : 0),
   };
+}
+
+function parseAttendanceStats(raw: unknown): AttendanceStatModel[] {
+  const fromList = extractMapList(raw);
+  if (fromList.length > 0) return fromList.map(parseAttendanceStat);
+
+  if (isRecord(raw)) {
+    for (const key of ['points', 'data', 'results', 'items', 'attendance', 'attendance_stats', 'statistics', 'stats', 'chart', 'days', 'daily', 'daily_stats', 'weekly']) {
+      const nested = raw[key];
+      if (Array.isArray(nested)) return nested.filter(isRecord).map(parseAttendanceStat);
+      if (isRecord(nested)) {
+        const nestedList = parseAttendanceStats(nested);
+        if (nestedList.length > 0) return nestedList;
+      }
+    }
+    if ('attended' in raw || 'present' in raw || 'came' in raw || 'absent' in raw || 'not_came' in raw) {
+      return [parseAttendanceStat(raw)];
+    }
+  }
+
+  return [];
 }
 
 function parseRoomGroup(j: Record<string, unknown>): RoomGroupModel {
@@ -593,7 +634,7 @@ export const dashboardApi = createApi({
             { url: ApiPaths.analyticsAttendance },
             { url: '/dashboard/attendance/' },
           ],
-          (raw) => extractMapList(raw).map(parseAttendanceStat)
+          parseAttendanceStats
         ),
     }),
 

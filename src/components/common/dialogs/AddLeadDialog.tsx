@@ -6,16 +6,20 @@ import {
 import {
     useCreateLeadMutation,
     useGetLeadChoicesQuery,
-    useMoveLeadToWaitingMutation,
-    useUpdateLeadStatusMutation,
+    useLazyVerifyLeadPersistedQuery,
 } from '../../../store/api/leadApi';
 import { useGetBranchesQuery } from '../../../store/api/settingsApi';
-import { getSelectedBranchId } from '../../../utils/branchContext';
+import { getSelectedBranchId, getSelectedBranchName } from '../../../utils/branchContext';
 import { formatApiError } from '../../../utils/apiError';
 import { MODAL_OVERLAY_CLASS, MODAL_PANEL_CLASS } from '../modalStyles';
 import CustomSelect from '../CustomSelect';
+import UzbekPhoneInput from '../UzbekPhoneInput';
 import { useToast } from '../../../hooks/useToast';
 import type { LidModel } from '../../../types';
+import {
+    formatUzbekPhoneForApi,
+    isUzbekPhoneComplete,
+} from '../../../utils/uzbekPhone';
 
 type Goal = 'trial_lesson' | 'level_test' | 'consultation';
 type PrefDay = 'mon_wed_fri' | 'tue_thu_sat' | 'every_day';
@@ -61,8 +65,7 @@ export default function AddLeadDialog({
     onCreated?: (lead: LidModel) => void;
 }) {
     const [createLead, { isLoading: creating }] = useCreateLeadMutation();
-    const [moveLeadToWaiting, { isLoading: moving }] = useMoveLeadToWaitingMutation();
-    const [updateLeadStatus, { isLoading: updatingStatus }] = useUpdateLeadStatusMutation();
+    const [verifyLead] = useLazyVerifyLeadPersistedQuery();
     const { data: choices } = useGetLeadChoicesQuery();
     const { data: branchesRaw = [] } = useGetBranchesQuery();
 
@@ -77,7 +80,7 @@ export default function AddLeadDialog({
         goal: 'trial_lesson' as Goal,
         prefDays: 'mon_wed_fri' as PrefDay,
         prefTime: 'afternoon' as PrefTime,
-        whichBranchId: '',
+        trialGroupId: '',
         date: '',
         time: '',
         note: '',
@@ -85,29 +88,37 @@ export default function AddLeadDialog({
     const [error, setError] = useState('');
     const toast = useToast();
 
-    const sources = choices?.sources?.length
+    const sources = (choices?.sources?.length
         ? choices.sources
         : [
               { value: 'telegram', label: 'Telegram' },
               { value: 'instagram', label: 'Instagram' },
               { value: 'walk_in', label: 'Walk in' },
-          ];
+          ]
+    ).filter((s) => s.value?.trim() && s.label?.trim());
 
-    const genders = choices?.genders?.length
-        ? choices.genders
-        : [
-              { value: 'male', label: 'Male' },
-              { value: 'female', label: 'Female' },
-          ];
+    const defaultGenders = [
+        { value: 'male', label: 'Male' },
+        { value: 'female', label: 'Female' },
+    ];
+    const apiGenders = (choices?.genders ?? []).filter(
+        (g) => g.value?.trim() && g.label?.trim(),
+    );
+    const genders = apiGenders.length ? apiGenders : defaultGenders;
 
-    const statuses = choices?.statuses?.length
+    const statuses = (choices?.statuses?.length
         ? choices.statuses
         : [
               { value: 'lead', label: 'Lead' },
               { value: 'waiting', label: 'Waiting' },
               { value: 'call', label: 'Call' },
-              { value: 'came', label: 'Came' },
-          ];
+              { value: 'archive', label: 'Archive' },
+          ]
+    ).filter((s) => s.value?.trim() && s.label?.trim());
+
+    const trialGroups = (choices?.groups ?? [])
+        .map((g) => ({ value: String(g.id), label: g.name }))
+        .filter((g) => g.value && g.label);
 
     const branches = useMemo(() => {
         if (branchesRaw.length === 0) return FALLBACK_BRANCHES;
@@ -117,9 +128,9 @@ export default function AddLeadDialog({
         }));
     }, [branchesRaw]);
 
-    const canSubmit = !!form.name.trim() && !!form.phone.trim();
+    const canSubmit = !!form.name.trim() && isUzbekPhoneComplete(form.phone);
 
-    const isLoading = creating || moving || updatingStatus;
+    const isLoading = creating;
 
     const submit = async () => {
         if (!canSubmit) return;
@@ -127,7 +138,6 @@ export default function AddLeadDialog({
 
         const headerBranchId = getSelectedBranchId() || '1';
         const branchId = headerBranchId;
-        const preferredBranchId = form.whichBranchId || form.branchId || headerBranchId;
         const branchNum = Number(branchId);
         if (!branchNum || Number.isNaN(branchNum)) {
             setError('Select a valid branch (same as in the top bar).');
@@ -138,75 +148,83 @@ export default function AddLeadDialog({
         const commentParts: string[] = [];
         if (form.note.trim()) commentParts.push(form.note.trim());
 
-        const initialStatus = form.status || 'lead';
-        const hasSchedule = Boolean(form.date && form.time);
+        const selectedStatus = (form.status || 'lead').toLowerCase();
+        const target = selectedLeadTarget(selectedStatus);
+        const needsQualification = target.stage === 'waiting' || target.stage === 'call';
+        const withTrialSchedule = needsQualification && Boolean(form.date && form.time);
+        if (needsQualification && !form.branchId) {
+            setError('Select branch for Waiting or Call status.');
+            return;
+        }
+        if (needsQualification && form.goal === 'trial_lesson' && !form.trialGroupId) {
+            setError('Select trial group.');
+            return;
+        }
+        if (needsQualification && (!form.date || !form.time)) {
+            setError('Date and time are required for Waiting or Call.');
+            return;
+        }
 
-        const created = await createLead({
+        const phoneApi = formatUzbekPhoneForApi(form.phone);
+        if (!phoneApi) {
+            setError('Enter a valid 9-digit phone number.');
+            return;
+        }
+
+        const saved = await createLead({
             firstName: form.name.trim(),
-            phone: form.phone.trim(),
-            status: hasSchedule ? 'lead' : initialStatus,
+            phone: phoneApi,
+            status: selectedStatus,
             source: form.source || undefined,
             gender: form.gender || undefined,
-            branch: branchNum,
+            branch: needsQualification || target.stage !== 'lead' ? branchNum : undefined,
             comment: commentParts.join('\n') || undefined,
-            goal: form.goal,
-            preferredDays: form.prefDays,
-            preferredTime: form.prefTime,
+            goal: needsQualification ? form.goal : undefined,
+            preferredDays: needsQualification ? form.prefDays : undefined,
+            preferredTime: needsQualification ? form.prefTime : undefined,
             telegramUsername: form.telegram.trim() || undefined,
-            scheduledDate: form.date || undefined,
-            scheduledTime: form.time || undefined,
-            preferredBranchId,
+            scheduledDate: withTrialSchedule ? form.date : undefined,
+            scheduledTime: withTrialSchedule ? form.time : undefined,
+            trialGroup:
+                needsQualification && form.goal === 'trial_lesson'
+                    ? Number(form.trialGroupId) || form.trialGroupId
+                    : undefined,
+            came: target.came,
             giveBook: false,
         }).unwrap();
 
-        if (created?.id == null) {
-            throw new Error('Lead was saved but the server did not return an id. Click Refresh.');
+        if (saved?.id == null || saved.id <= 0) {
+            throw new Error('Server did not return a valid lead id. API may not be connected.');
         }
 
-        if (hasSchedule) {
-            try {
-                await moveLeadToWaiting({
-                    id: created.id,
-                    preferredBranchId,
-                    scheduledDate: form.date,
-                    scheduledTime: form.time,
-                    goal: form.goal,
-                    preferredDays: form.prefDays,
-                    preferredTime: form.prefTime,
-                    comment: commentParts.join('\n') || undefined,
-                    firstName: form.name.trim(),
-                    telegramUsername: form.telegram.trim() || undefined,
-                }).unwrap();
-            } catch {
-                await updateLeadStatus({ id: created.id, status: 'waiting' }).unwrap();
-            }
-        } else if (initialStatus === 'waiting') {
-            await updateLeadStatus({ id: created.id, status: 'waiting' }).unwrap();
-        } else if (initialStatus !== 'lead') {
-            await updateLeadStatus({ id: created.id, status: initialStatus }).unwrap();
+        const verified = await verifyLead({
+            phone: phoneApi,
+            id: saved.id,
+        }).unwrap();
+
+        if (!verified) {
+            throw new Error(
+                `Lead #${saved.id} was created but not found in branch "${getSelectedBranchName() ?? branchId}". ` +
+                'Check the branch in the top bar matches the form.',
+            );
         }
 
-        const finalStatus = hasSchedule ? 'waiting' : (initialStatus || 'lead');
-
-        onCreated?.({
-            id: created.id,
-            firstName: form.name.trim(),
-            phone: form.phone.trim(),
+        const finalStatus = (saved.status ?? selectedStatus).toLowerCase();
+        const displayLead = {
+            ...verified,
             status: finalStatus,
-            source: form.source || undefined,
-            comment: commentParts.join('\n') || undefined,
-            branch: branchNum,
-            gender: form.gender || undefined,
-            giveBook: false,
-            goal: form.goal,
-            preferredDays: form.prefDays.replace(/_/g, '-'),
-            preferredTimeSlot: form.prefTime,
-            telegramUsername: form.telegram.trim() || undefined,
-            scheduledDate: form.date || undefined,
-            scheduledTime: form.time || undefined,
-            createdAt: new Date().toISOString(),
-        });
+            came: saved.came ?? verified.came ?? target.came,
+            isArchived: finalStatus === 'archive' || verified.isArchived,
+        };
 
+        /*
+            toast.info(
+                `Lead #${saved.id} created. Backend kept stage "${finalStatus}" — ` +
+                'only POST /lead/{id}/move/ can change stage on server.',
+            );
+        */
+
+        onCreated?.(displayLead);
         await onRefetch?.();
         onSuccess?.();
         toast.success('Lead created successfully');
@@ -257,9 +275,8 @@ export default function AddLeadDialog({
                             onChange={(v) => setForm({ ...form, name: v })}
                             autoFocus
                         />
-                        <InputBox
+                        <UzbekPhoneInput
                             icon={Phone}
-                            placeholder="Phone"
                             value={form.phone}
                             onChange={(v) => setForm({ ...form, phone: v })}
                         />
@@ -294,7 +311,6 @@ export default function AddLeadDialog({
                         </FieldLabel>
                     </div>
 
-                    {/* Branch / Status */}
                     <div className="grid grid-cols-2 gap-3">
                         <FieldLabel label="Branch">
                             <SelectBox
@@ -341,12 +357,13 @@ export default function AddLeadDialog({
                         />
                     </FieldLabel>
 
-                    {/* Which branch */}
-                    <FieldLabel label="Which branch?">
-                        <PillRow
-                            value={form.whichBranchId}
-                            options={branches.map((b) => ({ value: b.id, label: b.name }))}
-                            onChange={(v) => setForm({ ...form, whichBranchId: v })}
+                    {/* Trial group */}
+                    <FieldLabel label="Trial group">
+                        <SelectBox
+                            placeholder="Select trial group"
+                            value={form.trialGroupId}
+                            onChange={(v) => setForm({ ...form, trialGroupId: v })}
+                            options={trialGroups}
                         />
                     </FieldLabel>
 
@@ -473,6 +490,38 @@ function SelectBox({
     );
 }
 
+function selectedLeadTarget(status: string): { stage: string; came?: boolean } {
+    const raw = status.trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (['came', 'arrived', 'attended', 'present'].includes(raw)) {
+        return { stage: 'waiting', came: true };
+    }
+    if (['not_came', 'notcame', 'did_not_come', 'absent', 'missed'].includes(raw)) {
+        return { stage: 'waiting', came: false };
+    }
+    if (['scheduled', 'pending', 'in_waiting', 'on_hold'].includes(raw)) {
+        return { stage: 'waiting' };
+    }
+    if (['new', 'leads'].includes(raw)) {
+        return { stage: 'lead' };
+    }
+    if (['calling', 'calls'].includes(raw)) {
+        return { stage: 'call' };
+    }
+    if (raw === 'archived') {
+        return { stage: 'archive' };
+    }
+    return { stage: raw || 'lead' };
+}
+
+function leadMatchesSelectedStatus(lead: LidModel, selectedStatus: string): boolean {
+    const target = selectedLeadTarget(selectedStatus);
+    const actual = selectedLeadTarget(lead.status ?? '').stage;
+    if (target.came !== undefined) {
+        return actual === target.stage && lead.came === target.came;
+    }
+    return actual === target.stage;
+}
+
 function StatusChip({
     value,
     options,
@@ -506,7 +555,7 @@ function StatusChip({
                 </button>
             </div>
             {open && (
-                <div className="absolute left-0 right-0 top-14 z-10 rounded-xl border border-gray-100 bg-white shadow-lg">
+                <div className="absolute left-0 right-0 top-14 z-[200] rounded-xl border border-gray-100 bg-white shadow-lg max-h-56 overflow-y-auto">
                     {options.map((o) => (
                         <button
                             key={o.value}

@@ -25,7 +25,15 @@ export function formatApiError(error: unknown, fallback = 'Request failed. Check
   const err = error as { data?: unknown; status?: number | string; error?: string };
   const data = err.data;
 
-  if (typeof data === 'string' && data.trim()) return data;
+  if (typeof data === 'string' && data.trim()) {
+    const text = data.trim();
+    if (text.includes('<!DOCTYPE') || text.includes('<html') || text.includes('Page not found')) {
+      if (err.status === 404) return 'API endpoint not found (404). Check OpenAPI docs for the correct path.';
+      return fallback;
+    }
+    if (text.length > 280) return `${text.slice(0, 280)}…`;
+    return text;
+  }
 
   if (data && typeof data === 'object') {
     const payload = data as ErrorPayload;

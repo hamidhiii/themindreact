@@ -86,6 +86,65 @@
   .table-cell {
     @apply px-4 py-3 text-sm text-text-primary;
   }
+
+  input[type="date"] {
+    color-scheme: light;
+    min-height: 44px;
+    border: 1px solid #F0F1F5;
+    border-radius: 16px;
+    background-color: #F7F8FA;
+    color: #1A2233;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    padding: 10px 14px;
+    outline: none;
+    box-shadow: 0 2px 8px rgba(26, 34, 51, 0.03);
+    transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+  }
+
+  input[type="date"]:hover {
+    border-color: #E3E7EF;
+    background-color: #FFFFFF;
+  }
+
+  input[type="date"]:focus {
+    border-color: #ED6A2E;
+    background-color: #FFFFFF;
+    box-shadow: 0 0 0 3px rgba(237, 106, 46, 0.12);
+  }
+
+  input[type="date"]::-webkit-datetime-edit {
+    padding: 0;
+  }
+
+  input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
+  }
+
+  input[type="date"]::-webkit-datetime-edit-text,
+  input[type="date"]::-webkit-datetime-edit-day-field,
+  input[type="date"]::-webkit-datetime-edit-month-field,
+  input[type="date"]::-webkit-datetime-edit-year-field {
+    color: #1A2233;
+    font-weight: 800;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    width: 18px;
+    height: 18px;
+    margin-left: 10px;
+    padding: 4px;
+    border-radius: 8px;
+    cursor: pointer;
+    opacity: 0.9;
+    transition: background-color 180ms ease, opacity 180ms ease;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    background-color: rgba(237, 106, 46, 0.12);
+    opacity: 1;
+  }
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;

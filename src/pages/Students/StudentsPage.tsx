@@ -16,9 +16,18 @@ import { useCreatePaymentMutation } from '../../store/api/transactionApi';
 import ModalShell from '../../components/common/ModalShell';
 import CustomSelect from '../../components/common/CustomSelect';
 import { useToast } from '../../hooks/useToast';
+import { formatApiError } from '../../utils/apiError';
 import type { StudentModel } from '../../types';
 
 const PAGE_SIZE = 15;
+
+function amountValue(value: string | number | undefined): number {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    if (!value) return 0;
+    const normalized = String(value).replace(/[^\d.-]/g, '');
+    const n = Number(normalized);
+    return Number.isNaN(n) ? 0 : n;
+}
 
 export default function StudentsPage() {
     const navigate = useNavigate();
@@ -54,22 +63,19 @@ export default function StudentsPage() {
     const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
     const cards = dashboard?.cards;
-    const debtorCount =
-        cards?.debtors ??
-        students.filter((s) => Number(s.balance ?? 0) < 0).length;
-    const totalDebt =
-        cards?.totalDebt ??
-        students
-            .filter((s) => Number(s.balance ?? 0) < 0)
-            .reduce((sum, s) => sum + Math.abs(Number(s.balance ?? 0)), 0)
-            .toString();
-    const groupCount = cards?.groups ?? groups.length;
+    const localDebtorCount = students.filter((s) => amountValue(s.balance) < 0).length;
+    const localTotalDebt = students
+        .filter((s) => amountValue(s.balance) < 0)
+        .reduce((sum, s) => sum + Math.abs(amountValue(s.balance)), 0);
+    const debtorCount = (cards?.debtors || localDebtorCount);
+    const totalDebt = amountValue(cards?.totalDebt) || localTotalDebt;
+    const groupCount = (cards?.groups || groups.length);
 
     const dirStats = [
         { label: 'Leads', value: cards?.activeLeads ?? 0, icon: UserPlus, color: '#4C6FFF' },
-        { label: 'Students', value: cards?.activeStudents ?? students.length, icon: Users, color: '#2ECC8A' },
+        { label: 'Students', value: cards?.activeStudents || students.length, icon: Users, color: '#2ECC8A' },
         { label: 'Debtors', value: debtorCount, icon: AlertTriangle, color: '#ED6A2E', subText: 'Behind on payments' },
-        { label: 'Total debt', value: `${Number(totalDebt).toLocaleString()} UZS`, icon: CreditCard, color: '#E74C3C', subText: 'To receive' },
+        { label: 'Total debt', value: `${totalDebt.toLocaleString()} UZS`, icon: CreditCard, color: '#E74C3C', subText: 'To receive' },
         { label: 'Groups', value: groupCount, icon: BookOpen, color: '#9B59B6' },
     ];
 
@@ -493,6 +499,7 @@ function Pagination({
 function StudentCreateDialog({ onClose }: { onClose: () => void }) {
     const [createStudent, { isLoading }] = useCreateStudentMutation();
     const toast = useToast();
+    const [error, setError] = useState('');
     const { data: groups = [] } = useGetGroupsQuery();
     const [form, setForm] = useState({
         firstName: '',
@@ -510,24 +517,37 @@ function StudentCreateDialog({ onClose }: { onClose: () => void }) {
     const submit = async (event: React.FormEvent) => {
         event.preventDefault();
         if (!form.firstName.trim()) return;
-        await createStudent({
-            firstName: form.firstName.trim(),
-            lastName: form.lastName.trim(),
-            phone: form.phone.trim() || undefined,
-            parentPhone: form.parentPhone.trim() || undefined,
-            status: form.status,
-            gender: form.gender || undefined,
-            birthDate: form.birthDate || undefined,
-            source: form.source.trim() || undefined,
-            notes: form.notes.trim() || undefined,
-        }).unwrap();
-        toast.success('Student created successfully');
-        onClose();
+        setError('');
+        try {
+            await createStudent({
+                firstName: form.firstName.trim(),
+                lastName: form.lastName.trim(),
+                phone: form.phone.trim() || undefined,
+                parentPhone: form.parentPhone.trim() || undefined,
+                status: form.status,
+                gender: form.gender || undefined,
+                birthDate: form.birthDate || undefined,
+                source: form.source.trim() || undefined,
+                notes: form.notes.trim() || undefined,
+                groupId: form.groupId || undefined,
+            }).unwrap();
+            toast.success('Student created successfully');
+            onClose();
+        } catch (err) {
+            const msg = formatApiError(err, 'Could not create student.');
+            setError(msg);
+            toast.error(msg);
+        }
     };
 
     return (
         <ModalShell title="Add new student" onClose={onClose} maxWidthClass="max-w-lg">
             <form onSubmit={submit} className="space-y-3 p-5 max-h-[75vh] overflow-y-auto">
+                {error && (
+                    <div className="rounded-xl border border-[#E74C3C]/30 bg-[#E74C3C]/10 px-3 py-2 text-[11px] font-semibold text-[#C0392B]">
+                        {error}
+                    </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                     <Input
                         label="First name *"

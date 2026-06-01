@@ -10,6 +10,7 @@ import HomePage from '../pages/Home/HomePage';
 import StudentsPage from '../pages/Students/StudentsPage';
 import StudentDetailsPage from '../pages/Students/StudentDetailsPage';
 import LeadsPage from '../pages/Leads/LeadsPage';
+import LeadStatusDetailPage from '../pages/Leads/LeadStatusDetailPage';
 import GroupsPage from '../pages/Groups/GroupsPage';
 import GroupDetailsPage from '../pages/Groups/GroupDetailsPage';
 import TeachersPage from '../pages/Teachers/TeachersPage';
@@ -60,6 +61,7 @@ export default function AppRouter() {
               <Route path="/notifications" element={<NotificationsPage />} />
 
               <Route path="/active-leads" element={<LeadsPage />} />
+              <Route path="/active-leads/detail/:statusKey" element={<LeadStatusDetailPage />} />
               <Route path="/faol-lidlar" element={<Navigate to="/active-leads" replace />} />
               <Route path="/students" element={<StudentsPage />} />
               <Route path="/students/details/:studentId" element={<StudentDetailsPage />} />

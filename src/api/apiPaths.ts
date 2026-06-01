@@ -26,6 +26,8 @@ export const ApiPaths = {
   analyticsRoom: (id: string | number) => `/analytics/rooms/${id}/`,
 
   lead: '/lead/',
+  leadChoices: '/lead/choices/',
+  leadChoicesSources: '/lead/choices/sources/',
   leadSummary: '/lead/summary/',
   leadGroups: '/lead/groups/',
   leadId: (id: string | number) => `/lead/${id}/`,

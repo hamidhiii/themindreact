@@ -1,7 +1,8 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import { axiosBaseQuery } from '../../api/axiosBaseQuery';
 import { ApiPaths } from '../../api/apiPaths';
-import { dataWithFallbacks, extractMapList, unwrapEntity } from '../../api/apiResponse';
+import { dataWithFallbacks, extractMapList, isRecord, unwrapDataMap, unwrapEntity } from '../../api/apiResponse';
+import { getSelectedBranchId } from '../../utils/branchContext';
 import type {
   StudentModel,
   PaymentModel,
@@ -12,13 +13,22 @@ import type {
   DashboardModel,
 } from '../../types';
 
+function validStudentId(id: unknown): number | undefined {
+  if (typeof id === 'number' && Number.isFinite(id) && id > 0) return Math.trunc(id);
+  if (typeof id === 'string') {
+    const n = Number(id);
+    if (!Number.isNaN(n) && n > 0) return Math.trunc(n);
+  }
+  return undefined;
+}
+
 function parseStudent(j: Record<string, unknown>): StudentModel {
   const fullName = String(j['full_name'] ?? j['name'] ?? '').trim();
   const [fallbackFirst = '', ...fallbackLastParts] = fullName.split(/\s+/).filter(Boolean);
   const fallbackLast = fallbackLastParts.join(' ');
 
   return {
-    id: j['id'] as number | undefined,
+    id: validStudentId(j['id']),
     firstName: String(j['first_name'] ?? fallbackFirst),
     lastName: String(j['last_name'] ?? fallbackLast),
     phone: j['phone'] as string | undefined,
@@ -113,21 +123,78 @@ function parseJournal(j: Record<string, unknown>): JournalModel {
   };
 }
 
-function parseDashboard(j: Record<string, unknown>): DashboardModel {
-  const cards = (j['cards'] ?? j) as Record<string, unknown>;
+function asNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const normalized = value.replace(/[^\d.-]/g, '');
+    const n = Number(normalized);
+    if (!Number.isNaN(n)) return n;
+  }
+  return undefined;
+}
+
+function pickDashboardCards(cards: unknown): Partial<DashboardModel['cards']> {
+  if (!Array.isArray(cards)) return {};
+  const picked: Partial<DashboardModel['cards']> = {};
+
+  for (const item of cards) {
+    if (!isRecord(item)) continue;
+    const key = String(item['key'] ?? item['slug'] ?? item['type'] ?? item['title'] ?? item['label'] ?? '').toLowerCase();
+    const rawValue = item['value'] ?? item['count'] ?? item['total'] ?? item['amount'];
+    const value = asNumber(rawValue) ?? 0;
+
+    if (key.includes('total') && key.includes('debt')) picked.totalDebt = String(rawValue ?? value);
+    else if (key.includes('lead')) picked.activeLeads = value;
+    else if (key.includes('student')) picked.activeStudents = value;
+    else if (key.includes('debtor') || key.includes('debt')) picked.debtors = value;
+    else if (key.includes('group')) picked.groups = value;
+  }
+
+  return picked;
+}
+
+function dashboardSource(raw: unknown): Record<string, unknown> {
+  const root = unwrapDataMap(raw);
+  for (const key of ['cards', 'stats', 'summary', 'overview', 'data']) {
+    const nested = root[key];
+    if (isRecord(nested)) return nested;
+  }
+  return root;
+}
+
+function readNumber(source: Record<string, unknown>, keys: string[], fallback = 0): number {
+  for (const key of keys) {
+    const value = asNumber(source[key]);
+    if (value !== undefined) return value;
+  }
+  return fallback;
+}
+
+function readString(source: Record<string, unknown>, keys: string[], fallback = '0'): string {
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null && value !== '') return String(value);
+  }
+  return fallback;
+}
+
+function parseDashboard(raw: unknown): DashboardModel {
+  const root = unwrapDataMap(raw);
+  const source = dashboardSource(raw);
+  const fromArray = pickDashboardCards(root['cards']);
   return {
-    month: (j['month'] ?? '') as string,
+    month: String(source['month'] ?? root['month'] ?? ''),
     cards: {
-      activeLeads: Number(cards['active_leads'] ?? cards['activeLeads'] ?? 0),
-      activeStudents: Number(cards['active_students'] ?? cards['activeStudents'] ?? 0),
-      debtors: Number(cards['debtors'] ?? 0),
-      totalDebt: String(cards['total_debt'] ?? cards['totalDebt'] ?? '0'),
-      groups: Number(cards['groups'] ?? 0),
+      activeLeads: fromArray.activeLeads ?? readNumber(source, ['active_leads', 'activeLeads', 'leads', 'total_leads', 'lead_count']),
+      activeStudents: fromArray.activeStudents ?? readNumber(source, ['active_students', 'activeStudents', 'students', 'total_students', 'student_count', 'students_count']),
+      debtors: fromArray.debtors ?? readNumber(source, ['debtors', 'debtor_students', 'debtors_count', 'debtor_count']),
+      totalDebt: fromArray.totalDebt ?? readString(source, ['total_debt', 'totalDebt', 'debt_total', 'debt_sum', 'debt']),
+      groups: fromArray.groups ?? readNumber(source, ['groups', 'active_groups', 'total_groups', 'group_count', 'groups_count']),
     },
   };
 }
 
-function studentToBody(data: {
+type StudentBodyInput = {
   firstName?: string;
   lastName?: string;
   phone?: string;
@@ -140,30 +207,80 @@ function studentToBody(data: {
   notes?: string;
   groupId?: string;
   balance?: string;
-}): Record<string, unknown> {
+  telegram?: string;
+  branchId?: string | number;
+};
+
+function studentToBody(data: StudentBodyInput): Record<string, unknown> {
   const body: Record<string, unknown> = {};
-  if (data.firstName !== undefined) body['first_name'] = data.firstName;
-  if (data.lastName !== undefined) body['last_name'] = data.lastName;
+  const first = data.firstName?.trim() ?? '';
+  const last = data.lastName?.trim() ?? '';
+  const fullName = [first, last].filter(Boolean).join(' ');
+
+  if (first) body['first_name'] = first;
+  if (last) body['last_name'] = last;
+  if (fullName) {
+    body['full_name'] = fullName;
+    body['name'] = fullName;
+  }
   if (data.phone !== undefined) body['phone'] = data.phone;
-  if (data.parentPhone !== undefined) body['parent_phone'] = data.parentPhone;
+  if (data.parentPhone !== undefined) {
+    body['parent_phone'] = data.parentPhone;
+    body['additional_phone'] = data.parentPhone;
+  }
   if (data.status !== undefined) body['status'] = data.status;
   if (data.birthDate !== undefined) body['birth_date'] = data.birthDate;
   if (data.gender !== undefined) body['gender'] = data.gender;
   if (data.district !== undefined) body['district'] = data.district;
   if (data.source !== undefined) body['source'] = data.source;
   if (data.notes !== undefined) body['notes'] = data.notes;
+  if (data.telegram !== undefined) {
+    body['telegram'] = data.telegram;
+    body['telegram_username'] = data.telegram;
+  }
   if (data.groupId !== undefined && data.groupId !== '') {
     const groupId = Number(data.groupId);
-    body['group'] = Number.isNaN(groupId) ? data.groupId : groupId;
+    const value = Number.isNaN(groupId) ? data.groupId : groupId;
+    body['group'] = value;
+    body['group_id'] = value;
   }
   if (data.balance !== undefined) body['balance'] = data.balance;
+
+  const branchRaw = data.branchId ?? getSelectedBranchId();
+  if (branchRaw != null && branchRaw !== '') {
+    const branchNum = Number(branchRaw);
+    const branch = Number.isNaN(branchNum) ? branchRaw : branchNum;
+    body['branch'] = branch;
+    body['branch_id'] = branch;
+  }
+
   return body;
+}
+
+function parseCreatedStudent(raw: unknown, fallback: StudentBodyInput): StudentModel {
+  const entity = unwrapEntity(raw, ['student', 'item', 'result', 'data']);
+  const parsed = parseStudent(entity);
+  if (parsed.id == null) {
+    const map = unwrapDataMap(raw);
+    parsed.id = validStudentId(map['id'] ?? entity['id']);
+  }
+  if (!parsed.firstName?.trim() && fallback.firstName) parsed.firstName = fallback.firstName;
+  if (!parsed.lastName?.trim() && fallback.lastName) parsed.lastName = fallback.lastName;
+  if (!parsed.phone && fallback.phone) parsed.phone = fallback.phone;
+  if (!parsed.status && fallback.status) parsed.status = fallback.status;
+  return parsed;
+}
+
+type StudentQueryError = { status: number | undefined; data: {} };
+
+function toStudentQueryError(error: unknown): { error: StudentQueryError } {
+  return { error: error as StudentQueryError };
 }
 
 export const studentApi = createApi({
   reducerPath: 'studentApi',
   baseQuery: axiosBaseQuery(),
-  tagTypes: ['Student', 'Payment', 'Journal', 'StudentUi'],
+  tagTypes: ['Student', 'Payment', 'Journal', 'StudentUi', 'StudentGroup'],
   endpoints: (builder) => ({
     getStudents: builder.query<StudentModel[], { name?: string; phone?: string; status?: string; group?: number } | void>({
       queryFn: (params = {}, _api, _extra, baseQuery) =>
@@ -245,8 +362,9 @@ export const studentApi = createApi({
             { url: ApiPaths.studentsStats },
             { url: '/student/ui/dashboard/' },
           ],
-          (raw) => parseDashboard(raw as Record<string, unknown>)
+          parseDashboard
         ),
+      providesTags: ['StudentUi'],
     }),
     getStudentFilters: builder.query<Record<string, unknown>, void>({
       query: () => ({ url: '/student/ui/filters/' }),
@@ -269,16 +387,29 @@ export const studentApi = createApi({
       notes?: string;
       groupId?: string;
       balance?: string;
+      telegram?: string;
+      branchId?: string | number;
     }>({
-      queryFn: (data, _api, _extra, baseQuery) =>
-        dataWithFallbacks(
-          baseQuery,
-          [
-            { url: ApiPaths.students, method: 'POST', data: studentToBody(data) },
-          ],
-          (raw) => parseStudent(unwrapEntity(raw, ['student', 'item', 'result']))
-        ),
-      invalidatesTags: ['Student'],
+      async queryFn(data, _api, _extra, baseQuery) {
+        const body = studentToBody(data);
+        const result = await baseQuery({
+          url: ApiPaths.students,
+          method: 'POST',
+          data: body,
+        });
+        if (result.error) {
+          return toStudentQueryError(result.error);
+        }
+        const parsed = parseCreatedStudent(result.data, data);
+        if (parsed.id == null) {
+          return toStudentQueryError({
+            status: 400,
+            data: { detail: 'Student was not created — server did not return a valid id.' },
+          });
+        }
+        return { data: parsed };
+      },
+      invalidatesTags: ['Student', 'StudentUi'],
     }),
     updateStudent: builder.mutation<StudentModel, {
       id: string | number;
@@ -303,7 +434,7 @@ export const studentApi = createApi({
           ],
           (raw) => parseStudent(raw as Record<string, unknown>)
         ),
-      invalidatesTags: ['Student'],
+      invalidatesTags: ['Student', 'StudentUi'],
     }),
     deleteStudent: builder.mutation<void, string | number>({
       queryFn: (id, _api, _extra, baseQuery) =>
@@ -315,7 +446,7 @@ export const studentApi = createApi({
           ],
           () => undefined
         ),
-      invalidatesTags: ['Student'],
+      invalidatesTags: ['Student', 'StudentUi'],
     }),
     getStudentPayments: builder.query<PaymentModel[], string | number>({
       queryFn: (studentId, _api, _extra, baseQuery) =>
@@ -339,10 +470,15 @@ export const studentApi = createApi({
               method: 'POST',
               data: { student_id: studentId },
             },
+            {
+              url: ApiPaths.groupStudents(groupId),
+              method: 'POST',
+              data: { student: studentId },
+            },
           ],
           () => undefined
         ),
-      invalidatesTags: ['Student'],
+      invalidatesTags: ['Student', 'StudentGroup'],
     }),
     getJournal: builder.query<JournalModel, { groupId: number; lessonDate?: string; teacherId?: string }>({
       query: ({ groupId, lessonDate, teacherId }) => ({

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { LucideIcon } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import {
     Plus, Search, RotateCcw,
     Clock, PhoneIncoming, Archive, Zap,
@@ -8,10 +8,9 @@ import {
     useGetLeadsQuery,
     useDeleteLeadMutation,
     useUpdateLeadMutation,
-    useUpdateLeadStatusMutation,
     useGetLeadChoicesQuery,
     useArchiveLeadMutation,
-    useMoveLeadToWaitingMutation,
+    useTransitionLeadStageMutation,
 } from '../../store/api/leadApi';
 import ModalShell from '../../components/common/ModalShell';
 import CustomSelect from '../../components/common/CustomSelect';
@@ -20,55 +19,14 @@ import LeadCard from '../../components/leads/LeadCard';
 import { useToast } from '../../hooks/useToast';
 import type { LidModel, LeadPipelineSummary } from '../../types';
 import { getSelectedBranchId, subscribeBranch } from '../../utils/branchContext';
-
-interface LeadColumn {
-    id: string;
-    matchStatuses: string[];
-    label: string;
-    description: string;
-    color: string;
-    gradientFrom: string;
-    icon: LucideIcon;
-}
-
-const COLUMNS: LeadColumn[] = [
-    {
-        id: 'lead',
-        matchStatuses: ['lead', 'new'],
-        label: 'Leads',
-        description: 'New contacts waiting for the first touch.',
-        color: '#F37021',
-        gradientFrom: '#FFF5F0',
-        icon: Zap,
-    },
-    {
-        id: 'waiting',
-        matchStatuses: ['waiting', 'trial_lesson', 'trial', 'scheduled', 'pending'],
-        label: 'Waiting',
-        description: 'Pending confirmation and next follow up.',
-        color: '#9B59B6',
-        gradientFrom: '#F5F0FF',
-        icon: Clock,
-    },
-    {
-        id: 'call',
-        matchStatuses: ['call', 'calling'],
-        label: 'Call',
-        description: 'Each lead needs 3 logged calls before final decision.',
-        color: '#4C6FFF',
-        gradientFrom: '#EEF2FF',
-        icon: PhoneIncoming,
-    },
-    {
-        id: 'archive',
-        matchStatuses: ['archive', 'archived', 'came', 'not_came', 'no_answer'],
-        label: 'Archive',
-        description: 'Closed leads stored with outcome codes.',
-        color: '#8A9BB8',
-        gradientFrom: '#F5F6FA',
-        icon: Archive,
-    },
-];
+import { formatApiError } from '../../utils/apiError';
+import {
+    COLUMNS,
+    countByColumn,
+    leadInColumn,
+    pipelineColumnId,
+    type LeadSummaryCardKey,
+} from './leadPipelineUtils';
 
 const CALL_FILTERS = [
     { id: 'all', label: 'All calls' },
@@ -80,41 +38,6 @@ const CALL_FILTERS = [
 
 type CallFilter = (typeof CALL_FILTERS)[number]['id'];
 
-function isStatusInColumn(status: string, col: LeadColumn): boolean {
-    return col.matchStatuses.includes(status);
-}
-
-function leadPlacedElsewhere(lead: LidModel): boolean {
-    const status = lead.status?.toLowerCase() ?? '';
-    if (!status) return false;
-    return COLUMNS.some((c) => c.id !== 'lead' && isStatusInColumn(status, c));
-}
-
-function leadInColumn(lead: LidModel, col: LeadColumn): boolean {
-    const status = lead.status?.toLowerCase() ?? '';
-    const hasSchedule = Boolean(lead.scheduledDate || lead.scheduledTime);
-
-    if (col.id === 'archive') {
-        return Boolean(lead.isArchived) || isStatusInColumn(status, col);
-    }
-
-    if (col.id === 'waiting') {
-        if (isStatusInColumn(status, col)) return true;
-        if (hasSchedule && !['call', 'calling', 'archive', 'archived'].includes(status)) return true;
-        return false;
-    }
-
-    if (col.id === 'call') {
-        return isStatusInColumn(status, col);
-    }
-
-    if (lead.isArchived) return false;
-    if (hasSchedule) return false;
-    if (isStatusInColumn(status, col)) return true;
-    if (!status || status === 'lead' || status === 'new') return true;
-    return !leadPlacedElsewhere(lead);
-}
-
 function matchesCallFilter(lead: LidModel, filter: CallFilter): boolean {
     const count = lead.callCount ?? 0;
     if (filter === 'all') return true;
@@ -122,11 +45,31 @@ function matchesCallFilter(lead: LidModel, filter: CallFilter): boolean {
     return count === Number(filter);
 }
 
-function countByColumn(leads: LidModel[], col: LeadColumn): number {
-    return leads.filter((l) => leadInColumn(l, col)).length;
+function isAllowedPipelineMove(from: string, to: string): boolean {
+    if (to === 'lead') return false;
+    switch (from) {
+        case 'lead':
+            return to === 'waiting' || to === 'call' || to === 'archive';
+        case 'waiting':
+            return to === 'call' || to === 'archive';
+        case 'call':
+            return to === 'waiting' || to === 'archive';
+        case 'archive':
+            return to === 'waiting' || to === 'call';
+        default:
+            return false;
+    }
+}
+
+function resolveLeadBranchId(lead: LidModel, headerBranchId: string): number {
+    const b = lead.branch;
+    if (b != null && b > 0) return b;
+    const n = Number(headerBranchId);
+    return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 export default function LeadsPage() {
+    const navigate = useNavigate();
     const [search, setSearch] = useState('');
     const [callFilter, setCallFilter] = useState<CallFilter>('all');
     const [branchId, setBranchId] = useState(() => getSelectedBranchId() ?? '1');
@@ -135,13 +78,22 @@ export default function LeadsPage() {
     const [showEditModal, setShowEditModal] = useState(false);
     const [editingLead, setEditingLead] = useState<LidModel | null>(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+    const [attendanceLead, setAttendanceLead] = useState<LidModel | null>(null);
+    const [transitioningId, setTransitioningId] = useState<number | null>(null);
     const { success: toastSuccess, error: toastError } = useToast();
 
     useEffect(() => {
         return subscribeBranch(() => setBranchId(getSelectedBranchId() ?? '1'));
     }, []);
 
-    const { data: leads = [], isLoading, isFetching, refetch } = useGetLeadsQuery(
+    const {
+        data: leads = [],
+        isLoading,
+        isFetching,
+        isError: leadsLoadError,
+        error: leadsError,
+        refetch,
+    } = useGetLeadsQuery(
         {
             branchId,
             search: search.trim() || undefined,
@@ -159,9 +111,8 @@ export default function LeadsPage() {
     const { data: choices } = useGetLeadChoicesQuery();
     const [updateLead] = useUpdateLeadMutation();
     const [deleteLead] = useDeleteLeadMutation();
-    const [updateLeadStatus] = useUpdateLeadStatusMutation();
     const [archiveLead] = useArchiveLeadMutation();
-    const [moveLeadToWaiting] = useMoveLeadToWaitingMutation();
+    const [transitionLeadStage] = useTransitionLeadStageMutation();
 
     const mergedLeads = useMemo(() => {
         const byId = new Map<number, LidModel>();
@@ -195,43 +146,116 @@ export default function LeadsPage() {
         [visibleLeads],
     );
 
-    const summaryCards = [
+    const summaryCards: {
+        key: LeadSummaryCardKey;
+        label: string;
+        value: number;
+        icon: typeof Zap;
+        filled: boolean;
+        color: string;
+    }[] = [
         { key: 'leads', label: 'Leads', value: summary.leads, icon: Zap, filled: true, color: '#F37021' },
         { key: 'waiting', label: 'Waiting', value: summary.waiting, icon: Clock, filled: false, color: '#9B59B6' },
         { key: 'calling', label: 'Calling', value: summary.calling, icon: PhoneIncoming, filled: false, color: '#4C6FFF' },
         { key: 'archived', label: 'Archived', value: summary.archived, icon: Archive, filled: false, color: '#8A9BB8' },
     ];
 
+    const openStatusDetail = (key: LeadSummaryCardKey) => {
+        navigate(`/active-leads/detail/${key}`);
+    };
+
     const notify = (msg: string) => {
         if (/could not|failed/i.test(msg)) toastError(msg);
         else toastSuccess(msg);
     };
 
-    const handleStatusChange = async (lead: LidModel, nextStatus: string) => {
-        if (lead.id == null || lead.status === nextStatus) return;
-        try {
-            if (nextStatus === 'archive') {
-                await archiveLead({ id: lead.id, archiveReason: 'Moved to archive' }).unwrap();
-            } else if (nextStatus === 'waiting') {
-                if (lead.scheduledDate && lead.scheduledTime) {
-                    await moveLeadToWaiting({
-                        id: lead.id,
-                        preferredBranchId: lead.branch ?? branchId,
-                        scheduledDate: lead.scheduledDate,
-                        scheduledTime: lead.scheduledTime,
-                        firstName: lead.firstName,
-                        comment: lead.comment,
-                    }).unwrap();
-                } else {
-                    await updateLeadStatus({ id: lead.id, status: 'waiting' }).unwrap();
-                }
-            } else {
-                await updateLeadStatus({ id: lead.id, status: nextStatus }).unwrap();
-            }
-            notify('Status updated');
-        } catch {
-            notify('Could not update lead status');
+    const applyOptimisticStage = (lead: LidModel, target: string, came?: boolean) => {
+        const patch: LidModel = {
+            ...lead,
+            status: target,
+            isArchived: target === 'archive',
+            came: came ?? lead.came,
+        };
+        setOptimisticLeads((prev) => [
+            ...prev.filter((l) => l.id !== lead.id),
+            patch,
+        ]);
+    };
+
+    const runStageTransition = async (
+        lead: LidModel,
+        target: string,
+        options?: { came?: boolean; archiveReason?: string },
+    ) => {
+        if (lead.id == null) return;
+        const from = pipelineColumnId(lead);
+        if (!isAllowedPipelineMove(from, target)) {
+            toastError('This move is not allowed in the pipeline.');
+            return;
         }
+        if (from === target) return;
+
+        setTransitioningId(lead.id);
+        applyOptimisticStage(lead, target, options?.came);
+
+        const branch = resolveLeadBranchId(lead, branchId);
+        try {
+            if (target === 'archive') {
+                await archiveLead({
+                    id: lead.id,
+                    archiveReason: options?.archiveReason ?? 'no_answer',
+                    comment: lead.comment,
+                }).unwrap();
+            } else {
+                await transitionLeadStage({
+                    id: lead.id,
+                    status: target,
+                    branch,
+                    came: options?.came,
+                    comment: lead.comment,
+                    firstName: lead.firstName,
+                    telegramUsername: lead.telegramUsername,
+                    scheduledDate: lead.scheduledDate,
+                    scheduledTime: lead.scheduledTime,
+                    preferredDays: lead.preferredDays,
+                    preferredTime: lead.preferredTimeSlot,
+                    goal: lead.goal,
+                }).unwrap();
+            }
+            await refetch();
+            notify('Status updated');
+        } catch (err) {
+            setOptimisticLeads((prev) => prev.filter((l) => l.id !== lead.id));
+            toastError(formatApiError(err, 'Could not update lead status'));
+        } finally {
+            setTransitioningId(null);
+        }
+    };
+
+    const handleStatusChange = async (lead: LidModel, nextStatus: string) => {
+        const target = nextStatus.toLowerCase();
+        if (lead.id == null) return;
+
+        const from = pipelineColumnId(lead);
+        if (!isAllowedPipelineMove(from, target)) {
+            toastError('This move is not allowed in the pipeline.');
+            return;
+        }
+
+        if (from === 'waiting' && target === 'call') {
+            setAttendanceLead(lead);
+            return;
+        }
+
+        const came = target === 'call' ? false : undefined;
+        await runStageTransition(lead, target, { came });
+    };
+
+    const confirmWaitingToCall = async (came: boolean) => {
+        const lead = attendanceLead;
+        setAttendanceLead(null);
+        if (!lead) return;
+        await runStageTransition(lead, 'call', { came });
     };
 
     return (
@@ -302,29 +326,43 @@ export default function LeadsPage() {
                 </div>
             </div>
 
+            {leadsLoadError && (
+                <div className="rounded-xl border border-[#E74C3C]/30 bg-[#E74C3C]/10 px-4 py-3 text-[12px] font-semibold text-[#C0392B]">
+                    Could not load leads: {formatApiError(leadsError, 'API error')}. Check branch header and try Refresh.
+                </div>
+            )}
+
             {/* Summary cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 {summaryCards.map((s) => {
                     const Icon = s.icon;
+                    const cardButtonClass =
+                        'w-full text-left rounded-[14px] p-4 flex items-center justify-between transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F37021]/50';
                     if (s.filled) {
                         return (
-                            <div
+                            <button
                                 key={s.key}
-                                className="rounded-[14px] p-4 flex items-center justify-between text-white shadow-[0_8px_24px_rgba(243,112,33,0.22)]"
+                                type="button"
+                                onClick={() => openStatusDetail(s.key)}
+                                className={`${cardButtonClass} text-white shadow-[0_8px_24px_rgba(243,112,33,0.22)] hover:brightness-105 hover:shadow-[0_10px_28px_rgba(243,112,33,0.28)] active:scale-[0.99]`}
                                 style={{ backgroundColor: s.color }}
+                                aria-label={`View all ${s.label} leads`}
                             >
                                 <div>
                                     <p className="text-[24px] font-black leading-none mb-0.5">{s.value}</p>
                                     <p className="text-[11px] font-bold text-white/90">{s.label}</p>
                                 </div>
                                 <Icon size={24} className="text-white/75" />
-                            </div>
+                            </button>
                         );
                     }
                     return (
-                        <div
+                        <button
                             key={s.key}
-                            className="bg-white rounded-[14px] border border-[#F0F1F5] p-4 flex items-center justify-between shadow-[0_2px_12px_rgba(26,34,51,0.04)]"
+                            type="button"
+                            onClick={() => openStatusDetail(s.key)}
+                            className={`${cardButtonClass} bg-white border border-[#F0F1F5] shadow-[0_2px_12px_rgba(26,34,51,0.04)] hover:border-[#F37021]/25 hover:shadow-[0_4px_16px_rgba(26,34,51,0.08)] active:scale-[0.99]`}
+                            aria-label={`View all ${s.label} leads`}
                         >
                             <div>
                                 <p className="text-[24px] font-black text-[#1A2233] leading-none mb-0.5">{s.value}</p>
@@ -336,7 +374,7 @@ export default function LeadsPage() {
                             >
                                 <Icon size={18} style={{ color: s.color }} />
                             </div>
-                        </div>
+                        </button>
                     );
                 })}
             </div>
@@ -451,6 +489,44 @@ export default function LeadsPage() {
                         }
                     }}
                 />
+            )}
+
+            {attendanceLead && (
+                <ModalShell
+                    title="Did the student come?"
+                    onClose={() => setAttendanceLead(null)}
+                >
+                    <div className="p-5 space-y-4">
+                        <p className="text-[12px] font-semibold text-[#5A6376]">
+                            {attendanceLead.firstName} — choose the outcome before moving to Call.
+                        </p>
+                        <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setAttendanceLead(null)}
+                                className="rounded-xl px-4 py-2 text-[11px] font-bold text-[#8A9BB8] hover:bg-gray-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                disabled={transitioningId === attendanceLead.id}
+                                onClick={() => confirmWaitingToCall(false)}
+                                className="rounded-xl border border-[#E66A52] px-4 py-2 text-[11px] font-bold text-[#E66A52] hover:bg-[#FFF5F0] disabled:opacity-50"
+                            >
+                                Did not come
+                            </button>
+                            <button
+                                type="button"
+                                disabled={transitioningId === attendanceLead.id}
+                                onClick={() => confirmWaitingToCall(true)}
+                                className="rounded-xl bg-[#4C6FFF] px-4 py-2 text-[11px] font-bold text-white hover:bg-[#3D5CE6] disabled:opacity-50"
+                            >
+                                Came
+                            </button>
+                        </div>
+                    </div>
+                </ModalShell>
             )}
 
             {confirmDeleteId != null && (
